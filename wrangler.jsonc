@@ -1,0 +1,52 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "live-studio",
+  "compatibility_date": "2025-04-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./workers/app.ts",
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "live-studio-db",
+      "database_id": "b4665af2-5f24-4d62-b50e-b81b38fc349a"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2_ASSETS",
+      "bucket_name": "live-studio-assets"
+    }
+  ]
+  // Secrets (set via CLI, NOT here):
+  //   npx wrangler secret put CF_CALLS_APP_ID
+  //   npx wrangler secret put CF_CALLS_APP_TOKEN
+  //   npx wrangler secret put CF_TURN_KEY_ID
+  //   npx wrangler secret put CF_TURN_API_TOKEN
+  //   npx wrangler secret put STRIPE_SECRET_KEY
+  //   npx wrangler secret put STRIPE_WEBHOOK_SECRET
+  //   npx wrangler secret put MANUAL_PAYMENT_ADMIN_TOKEN
+  //   npx wrangler secret put ADMIN_ACCESS_TOKEN
+  //   npx wrangler secret put ADMIN_EMAIL
+  //   npx wrangler secret put ADMIN_PASSWORD
+  //   npx wrangler secret put GOOGLE_CLIENT_ID
+  //   npx wrangler secret put RELAY_AUTH_SECRET
+  //   npx wrangler secret put RELAY_WEBSOCKET_URL
+  // Optional vars/secrets:
+  //   PUBLIC_APP_URL=https://your-domain.example
+  //   PUBLIC_GOOGLE_CLIENT_ID=google-client-id.apps.googleusercontent.com
+  //   R2_PUBLIC_BASE_URL=https://assets.example.com
+  //   ROOM_PASS_PRICE_CENTS=1500
+  //   BKASH_MERCHANT_NUMBER=01700000000
+}

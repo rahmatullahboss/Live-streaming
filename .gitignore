@@ -1,0 +1,30 @@
+.DS_Store
+.env
+/node_modules/
+*.tsbuildinfo
+
+# React Router
+/.react-router/
+/build/
+
+# Cloudflare
+.mf
+.wrangler
+.dev.vars*
+worker-configuration.d.ts
+
+
+# Auto-generated agent rules (personalized per developer)
+.brainsync/agent-rules.md
+
+AGENT.md
+CLAUDE.md
+.agent-mem/
+
+# Auto-generated AI agent exclusions
+.cursorrules
+.clineRules
+.agent/
+.windsurfrules
+.gemini/
+.cline/

@@ -1,0 +1,91 @@
+@import "tailwindcss" source(".");
+
+@theme {
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --page-bg: #081217;
+  --panel-bg: rgba(11, 21, 28, 0.86);
+  --panel-strong: #10222d;
+  --panel-soft: #0d1a22;
+  --border-soft: rgba(180, 219, 255, 0.12);
+  --border-strong: rgba(147, 223, 255, 0.28);
+  --text-main: #edf7fb;
+  --text-muted: #8ea7b5;
+  --accent-cyan: #50d8ff;
+  --accent-coral: #ff6f61;
+  --accent-lime: #bfff67;
+  --shadow-deep: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(circle at top left, rgba(80, 216, 255, 0.14), transparent 28%),
+    radial-gradient(circle at top right, rgba(255, 111, 97, 0.12), transparent 24%),
+    linear-gradient(180deg, #081217 0%, #050b0f 100%);
+}
+
+h1,
+h2,
+h3,
+[data-display] {
+  font-family: var(--font-display);
+}
+
+a,
+button,
+input,
+textarea,
+select {
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease,
+    opacity 160ms ease;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.glass-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-deep);
+  backdrop-filter: blur(18px);
+}
+
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.scoreboard-ticker {
+  display: inline-block;
+  min-width: 100%;
+  padding-right: 4rem;
+  animation: ticker-slide 22s linear infinite;
+}
+
+@keyframes ticker-slide {
+  0% {
+    transform: translateX(100%);
+  }
+
+  100% {
+    transform: translateX(-100%);
+  }
+}
