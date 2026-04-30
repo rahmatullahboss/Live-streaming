@@ -72,13 +72,35 @@ type MockAssetRecord = {
   tenant_id?: string | null;
 };
 
+type MockCameraRecord = {
+  audio_track_id?: string | null;
+  id: string;
+  is_active?: number | null;
+  last_seen_at?: string | null;
+  room_id: string;
+  session_id: string;
+  track_id: string;
+};
+
+type MockAuditRecord = {
+  action: string;
+  actor_email?: string | null;
+  created_at?: string | null;
+  id: string;
+  metadata_json?: string | null;
+  target_id: string;
+  target_type: string;
+};
+
 function createMockDb(
   initialRooms: MockRoomRecord[] = [],
   initialOverlays: MockOverlayRecord[] = [],
   initialRoomPasses: MockRoomPassRecord[] = [],
   initialTenants: MockTenantRecord[] = [],
   initialAssets: MockAssetRecord[] = [],
-  initialPackages: MockPackageRecord[] = []
+  initialPackages: MockPackageRecord[] = [],
+  initialCameras: MockCameraRecord[] = [],
+  initialAudits: MockAuditRecord[] = []
 ): D1Database {
   const rooms = new Map(initialRooms.map((room) => [room.id, room]));
   const overlays = new Map(initialOverlays.map((overlay) => [overlay.room_id, overlay]));
@@ -86,6 +108,8 @@ function createMockDb(
   const tenants = new Map(initialTenants.map((tenant) => [tenant.id, tenant]));
   const assets = new Map(initialAssets.map((asset) => [asset.id, asset]));
   const packages = new Map(initialPackages.map((item) => [item.id, item]));
+  const cameras = new Map(initialCameras.map((camera) => [camera.id, camera]));
+  const audits = new Map(initialAudits.map((audit) => [audit.id, audit]));
 
   const statement = {
     sql: "",
@@ -132,9 +156,43 @@ function createMockDb(
         };
       }
 
+      if (this.sql.includes("SELECT * FROM cameras")) {
+        return {
+          results: Array.from(cameras.values()).filter(
+            (camera) => camera.room_id === String(this.values[0]) && camera.is_active === 1
+          ),
+        };
+      }
+
+      if (this.sql.includes("SELECT * FROM admin_audit_logs")) {
+        return { results: Array.from(audits.values()) };
+      }
+
       return { results: [] };
     },
     async first() {
+      if (this.sql.includes("COUNT(*) AS row_count") && this.sql.includes("FROM packages")) {
+        return { row_count: packages.size };
+      }
+
+      if (this.sql.includes("COUNT(*) AS row_count") && this.sql.includes("FROM room_assets")) {
+        return { row_count: assets.size };
+      }
+
+      if (this.sql.includes("COUNT(*) AS row_count") && this.sql.includes("FROM admin_audit_logs")) {
+        return { row_count: audits.size };
+      }
+
+      if (this.sql.includes("COUNT(*) AS active_count")) {
+        const activeCount = Array.from(cameras.values()).filter(
+          (camera) =>
+            camera.room_id === String(this.values[0]) &&
+            camera.is_active === 1 &&
+            camera.id !== String(this.values[1])
+        ).length;
+        return { active_count: activeCount };
+      }
+
       if (this.sql.includes("SELECT * FROM rooms WHERE id = ?")) {
         return rooms.get(String(this.values[0])) ?? null;
       }
@@ -335,6 +393,32 @@ function createMockDb(
         });
       }
 
+      if (this.sql.includes("INSERT OR REPLACE INTO cameras")) {
+        const [id, roomId, trackId, audioTrackId, sessionId] = this.values;
+        cameras.set(String(id), {
+          audio_track_id: audioTrackId ? String(audioTrackId) : null,
+          id: String(id),
+          is_active: 1,
+          last_seen_at: new Date().toISOString(),
+          room_id: String(roomId),
+          session_id: String(sessionId),
+          track_id: String(trackId),
+        });
+      }
+
+      if (this.sql.includes("INSERT INTO admin_audit_logs")) {
+        const [id, actorEmail, action, targetType, targetId, metadataJson] = this.values;
+        audits.set(String(id), {
+          action: String(action),
+          actor_email: actorEmail ? String(actorEmail) : null,
+          created_at: new Date().toISOString(),
+          id: String(id),
+          metadata_json: metadataJson ? String(metadataJson) : null,
+          target_id: String(targetId),
+          target_type: String(targetType),
+        });
+      }
+
       if (this.sql.includes("INSERT INTO packages")) {
         const [
           id,
@@ -409,10 +493,12 @@ function createBindings(
   roomPasses: MockRoomPassRecord[] = [],
   tenants: MockTenantRecord[] = [],
   assets: MockAssetRecord[] = [],
-  packages: MockPackageRecord[] = []
+  packages: MockPackageRecord[] = [],
+  cameras: MockCameraRecord[] = [],
+  audits: MockAuditRecord[] = []
 ): Bindings {
   return {
-    DB: createMockDb(rooms, overlays, roomPasses, tenants, assets, packages),
+    DB: createMockDb(rooms, overlays, roomPasses, tenants, assets, packages, cameras, audits),
     CF_ACCOUNT_ID: "account-id",
     CF_CALLS_APP_ID: "calls-app-id",
     CF_CALLS_APP_TOKEN: "calls-app-token",
@@ -672,6 +758,81 @@ describe("api /rooms", () => {
     const payload = await response.json() as { rooms: Array<Record<string, unknown>> };
     expect(payload.rooms[0]).not.toHaveProperty("youtube_stream_key");
     expect(payload.rooms[0]).not.toHaveProperty("facebook_stream_key");
+  });
+});
+
+describe("api /rooms/:id/cameras", () => {
+  it("enforces the purchased package camera limit before registering a new camera", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/rooms/room_limited_01/cameras", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audioTrackName: "camera-2-audio",
+          id: "camera-2",
+          sessionId: "session-2",
+          videoTrackName: "camera-2-video",
+        }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_limited_01",
+            name: "Limited Room",
+            pin: "778899",
+            status: "active",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 1500,
+            currency: "usd",
+            duration_minutes: 180,
+            id: "pass_limited_01",
+            package_id: "one-camera",
+            payment_provider: "stripe",
+            room_id: "room_limited_01",
+            status: "paid",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [],
+        [
+          {
+            active: 1,
+            currency: "usd",
+            description: "One camera test package.",
+            duration_minutes: 180,
+            features: ["1 camera"],
+            id: "one-camera",
+            max_cameras: 1,
+            max_rooms: 1,
+            name: "One Camera",
+            price_cents: 1500,
+            sort_order: 1,
+          },
+        ],
+        [
+          {
+            id: "camera-1",
+            is_active: 1,
+            room_id: "room_limited_01",
+            session_id: "session-1",
+            track_id: "camera-1-video",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      message: "This package allows up to 1 active camera for this room",
+    });
   });
 });
 
@@ -1219,7 +1380,60 @@ describe("api /api/v1 package catalog and admin controls", () => {
     });
   });
 
+  it("returns production readiness checks with actionable missing configuration", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/admin/summary", {
+        headers: { Authorization: "Bearer admin-secret" },
+      }),
+      createBindings({
+        ADMIN_EMAIL: undefined,
+        ADMIN_PASSWORD: undefined,
+        BKASH_MERCHANT_NUMBER: undefined,
+        CF_CALLS_APP_ID: undefined,
+        CF_CALLS_APP_TOKEN: undefined,
+        GOOGLE_CLIENT_ID: undefined,
+        PUBLIC_GOOGLE_CLIENT_ID: undefined,
+        R2_ASSETS: undefined,
+        RELAY_AUTH_SECRET: undefined,
+        RELAY_WEBSOCKET_URL: undefined,
+        STRIPE_SECRET_KEY: undefined,
+        STRIPE_WEBHOOK_SECRET: undefined,
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      readiness: {
+        ready: false,
+        checks: expect.arrayContaining([
+          expect.objectContaining({
+            key: "admin_credentials",
+            ok: false,
+          }),
+          expect.objectContaining({
+            key: "google_gis",
+            ok: false,
+          }),
+          expect.objectContaining({
+            key: "payment_collection",
+            ok: false,
+          }),
+          expect.objectContaining({
+            key: "r2_assets",
+            ok: false,
+          }),
+          expect.objectContaining({
+            key: "managed_relay",
+            ok: false,
+          }),
+        ]),
+      },
+    });
+  });
+
   it("lets an admin update package controls without replacing the package model", async () => {
+    const bindings = createBindings();
     const response = await app.fetch(
       new Request("https://example.com/api/v1/admin/packages/starter-live", {
         method: "PATCH",
@@ -1238,7 +1452,7 @@ describe("api /api/v1 package catalog and admin controls", () => {
           sort_order: 5,
         }),
       }),
-      createBindings()
+      bindings
     );
 
     expect(response.status).toBe(200);
@@ -1255,6 +1469,22 @@ describe("api /api/v1 package catalog and admin controls", () => {
         price_cents: 2200,
         sort_order: 5,
       },
+    });
+
+    const summary = await app.fetch(
+      new Request("https://example.com/api/v1/admin/summary", {
+        headers: { Authorization: "Bearer admin-secret" },
+      }),
+      bindings
+    );
+    await expect(summary.json()).resolves.toMatchObject({
+      auditLogs: [
+        expect.objectContaining({
+          action: "package_update",
+          target_id: "starter-live",
+          target_type: "package",
+        }),
+      ],
     });
   });
 

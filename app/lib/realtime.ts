@@ -114,8 +114,33 @@ export type AdminSummary = {
   tenants: number;
 };
 
+export type AdminReadinessCheck = {
+  action: string;
+  key: string;
+  label: string;
+  ok: boolean;
+  severity: "error" | "warning";
+};
+
+export type AdminReadiness = {
+  checks: AdminReadinessCheck[];
+  ready: boolean;
+};
+
+export type AdminAuditLog = {
+  action: string;
+  actor_email?: string | null;
+  created_at?: string | null;
+  id: string;
+  metadata_json?: string | null;
+  target_id: string;
+  target_type: string;
+};
+
 export type AdminDashboard = {
+  auditLogs: AdminAuditLog[];
   packages: StreamingPackage[];
+  readiness: AdminReadiness;
   roomPasses: RoomPassSummary[];
   rooms: RoomSummary[];
   summary: AdminSummary;

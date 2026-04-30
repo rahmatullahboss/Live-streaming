@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
+  AlertTriangle,
   CheckCircle2,
   Loader2,
   Play,
@@ -25,6 +26,8 @@ import {
   updateAdminPackage,
   type AdminPackageUpdate,
   type AdminDashboard,
+  type AdminAuditLog,
+  type AdminReadiness,
   type RoomPassSummary,
   type RoomSummary,
   type StreamingPackage,
@@ -321,6 +324,8 @@ export default function AdminRoute() {
             <Metric label="Paid purchases" value={String(dashboard.summary.paidPurchases)} />
           </section>
 
+          <ReadinessPanel readiness={dashboard.readiness} />
+
           <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_420px]">
             <div className="space-y-5">
               <Panel title="Manual payment queue">
@@ -387,6 +392,18 @@ export default function AdminRoute() {
                         saving={mutatingPackageId === item.id}
                         onSave={(input) => void handlePackageSave(item.id, input)}
                       />
+                    ))}
+                  </div>
+                )}
+              </Panel>
+
+              <Panel title="Recent admin actions">
+                {dashboard.auditLogs.length === 0 ? (
+                  <EmptyState text="No admin actions have been recorded yet." />
+                ) : (
+                  <div className="space-y-3">
+                    {dashboard.auditLogs.map((item) => (
+                      <AuditLogItem key={item.id} item={item} />
                     ))}
                   </div>
                 )}
@@ -466,6 +483,90 @@ function PaymentCard({
       </div>
     </article>
   );
+}
+
+function ReadinessPanel({ readiness }: { readiness: AdminReadiness }) {
+  const failingChecks = readiness.checks.filter((check) => !check.ok);
+
+  return (
+    <Panel title="Production readiness">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`rounded-full p-2 ${
+              readiness.ready
+                ? "bg-[var(--accent-lime)]/15 text-[var(--accent-lime)]"
+                : "bg-[var(--accent-coral)]/15 text-[#ffd8d4]"
+            }`}
+          >
+            {readiness.ready ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+          </div>
+          <div>
+            <p className="font-semibold text-[var(--text-main)]">
+              {readiness.ready ? "Ready for production traffic" : `${failingChecks.length} production checks need attention`}
+            </p>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              Secrets, migrations, payment, storage, relay, and tenant login checks.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {readiness.checks.map((check) => (
+          <div key={check.key} className="rounded-[1.15rem] border border-[var(--border-soft)] bg-black/15 p-4">
+            <div className="flex items-start gap-3">
+              <div
+                className={`mt-0.5 rounded-full p-1.5 ${
+                  check.ok
+                    ? "bg-[var(--accent-lime)]/15 text-[var(--accent-lime)]"
+                    : "bg-[var(--accent-coral)]/15 text-[#ffd8d4]"
+                }`}
+              >
+                {check.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[var(--text-main)]">{check.label}</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                  {check.ok ? "Configured" : check.action}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function AuditLogItem({ item }: { item: AdminAuditLog }) {
+  return (
+    <div className="rounded-[1.15rem] border border-[var(--border-soft)] bg-black/15 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-[var(--text-main)]">
+            {formatAuditAction(item.action)}
+          </p>
+          <p className="mt-1 truncate text-xs text-[var(--text-muted)]">
+            {item.target_type} · {item.target_id}
+          </p>
+        </div>
+        <span className="shrink-0 text-right text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+          {item.created_at ? new Date(item.created_at).toLocaleString() : "just now"}
+        </span>
+      </div>
+      <p className="mt-2 truncate text-xs text-[var(--text-muted)]">
+        {item.actor_email ?? "admin"}
+      </p>
+    </div>
+  );
+}
+
+function formatAuditAction(action: string): string {
+  return action
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 type PackageDraft = {

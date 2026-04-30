@@ -182,6 +182,16 @@ type RoomAssetRecord = {
 
 type AssetOverlayField = (typeof ALLOWED_ASSET_FIELDS)[number];
 
+type AdminAuditRecord = {
+  action: string;
+  actor_email?: string | null;
+  created_at?: string | null;
+  id: string;
+  metadata_json?: string | null;
+  target_id: string;
+  target_type: string;
+};
+
 type StripeCheckoutSession = {
   id: string;
   payment_status?: "no_payment_required" | "paid" | "unpaid";
@@ -227,6 +237,19 @@ type PackagePatchBody = Partial<
   >
 > & {
   features?: string[];
+};
+
+type ReadinessCheck = {
+  action: string;
+  key: string;
+  label: string;
+  ok: boolean;
+  severity: "error" | "warning";
+};
+
+type ReadinessResult = {
+  checks: ReadinessCheck[];
+  ready: boolean;
 };
 
 const DEFAULT_BROADCAST_DESTINATIONS: BroadcastDestinationRecord[] = [
@@ -696,6 +719,40 @@ async function startRoomSession(
   };
 }
 
+async function getRoomCameraLimit(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string
+): Promise<number> {
+  const roomPass = await c.env.DB.prepare(
+    "SELECT * FROM room_passes WHERE room_id = ? ORDER BY paid_at DESC, created_at DESC LIMIT 1"
+  ).bind(roomId).first<RoomPassRecord>();
+  const selectedPackage = await getSelectedPackage(c, roomPass?.package_id);
+  return selectedPackage.max_cameras;
+}
+
+async function assertRoomCameraCapacity(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string,
+  cameraId: string
+): Promise<void> {
+  const maxCameras = await getRoomCameraLimit(c, roomId);
+  const countRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS active_count
+      FROM cameras
+      WHERE room_id = ?
+        AND is_active = 1
+        AND last_seen_at >= datetime('now', '-300 seconds')
+        AND id != ?`
+  ).bind(roomId, cameraId).first<{ active_count: number }>();
+  const activeCount = Number(countRow?.active_count ?? 0);
+
+  if (activeCount >= maxCameras) {
+    throw new HTTPException(403, {
+      message: `This package allows up to ${maxCameras} active camera${maxCameras === 1 ? "" : "s"} for this room`,
+    });
+  }
+}
+
 async function expireRoomAccessNow(
   c: Context<{ Bindings: Bindings }>,
   roomId: string
@@ -1019,6 +1076,131 @@ function jsonSuccess<T extends Record<string, unknown>>(
   );
 }
 
+async function hasMigratedTable(
+  c: Context<{ Bindings: Bindings }>,
+  tableName: "admin_audit_logs" | "packages" | "room_assets"
+): Promise<boolean> {
+  try {
+    const row = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS row_count FROM ${tableName}`
+    ).first<{ row_count: number }>();
+    return Number(row?.row_count ?? 0) >= 0;
+  } catch {
+    return false;
+  }
+}
+
+async function buildProductionReadiness(
+  c: Context<{ Bindings: Bindings }>
+): Promise<ReadinessResult> {
+  const stripeConfigured = Boolean(c.env.STRIPE_SECRET_KEY?.trim() && c.env.STRIPE_WEBHOOK_SECRET?.trim());
+  const manualPaymentConfigured = Boolean(
+    c.env.MANUAL_PAYMENT_ADMIN_TOKEN?.trim() && c.env.BKASH_MERCHANT_NUMBER?.trim()
+  );
+  const checks: ReadinessCheck[] = [
+    {
+      action: "Set ADMIN_EMAIL, ADMIN_PASSWORD, and ADMIN_ACCESS_TOKEN with wrangler secret put.",
+      key: "admin_credentials",
+      label: "Admin email/password access",
+      ok: Boolean(getAdminEmail(c) && getAdminPassword(c) && getAdminToken(c)),
+      severity: "error",
+    },
+    {
+      action: "Set GOOGLE_CLIENT_ID and PUBLIC_GOOGLE_CLIENT_ID to the Google Web OAuth client ID.",
+      key: "google_gis",
+      label: "Google GIS tenant signup",
+      ok: Boolean(c.env.PUBLIC_GOOGLE_CLIENT_ID?.trim() || c.env.GOOGLE_CLIENT_ID?.trim()),
+      severity: "error",
+    },
+    {
+      action: "Configure Stripe secrets or manual bKash merchant/admin review secrets.",
+      key: "payment_collection",
+      label: "Payment collection",
+      ok: stripeConfigured || manualPaymentConfigured,
+      severity: "error",
+    },
+    {
+      action: "Bind R2_ASSETS and optionally set R2_PUBLIC_BASE_URL.",
+      key: "r2_assets",
+      label: "Tenant logo asset storage",
+      ok: Boolean(c.env.R2_ASSETS),
+      severity: "error",
+    },
+    {
+      action: "Set RELAY_WEBSOCKET_URL and RELAY_AUTH_SECRET for managed broadcast relay.",
+      key: "managed_relay",
+      label: "Managed broadcast relay",
+      ok: Boolean(c.env.RELAY_WEBSOCKET_URL?.trim() && c.env.RELAY_AUTH_SECRET?.trim()),
+      severity: "error",
+    },
+    {
+      action: "Set CF_CALLS_APP_ID and CF_CALLS_APP_TOKEN for Cloudflare Realtime SFU.",
+      key: "cloudflare_calls",
+      label: "Cloudflare Realtime SFU",
+      ok: Boolean(c.env.CF_CALLS_APP_ID?.trim() && c.env.CF_CALLS_APP_TOKEN?.trim()),
+      severity: "error",
+    },
+    {
+      action: "Run all D1 migrations through 0011_packages_google_assets_admin.sql.",
+      key: "packages_table",
+      label: "Package catalog migration",
+      ok: await hasMigratedTable(c, "packages"),
+      severity: "error",
+    },
+    {
+      action: "Run D1 migration 0011 so room_assets exists for tenant logo history.",
+      key: "room_assets_table",
+      label: "Room assets migration",
+      ok: await hasMigratedTable(c, "room_assets"),
+      severity: "error",
+    },
+    {
+      action: "Run D1 migration 0012 so admin actions are retained for operational audits.",
+      key: "admin_audit_logs_table",
+      label: "Admin audit log migration",
+      ok: await hasMigratedTable(c, "admin_audit_logs"),
+      severity: "error",
+    },
+  ];
+
+  return {
+    checks,
+    ready: checks.every((check) => check.ok || check.severity === "warning"),
+  };
+}
+
+async function recordAdminAudit(
+  c: Context<{ Bindings: Bindings }>,
+  input: {
+    action: string;
+    metadata?: Record<string, boolean | number | string | null>;
+    targetId: string;
+    targetType: string;
+  }
+): Promise<void> {
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO admin_audit_logs (
+        id,
+        actor_email,
+        action,
+        target_type,
+        target_id,
+        metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(
+      createPublicId("audit"),
+      getAdminEmail(c) || null,
+      input.action,
+      input.targetType,
+      input.targetId,
+      JSON.stringify(input.metadata ?? {})
+    ).run();
+  } catch {
+    // Older databases may not have the audit table yet. Readiness checks surface that gap.
+  }
+}
+
 function normalizeOutputUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
 
@@ -1327,18 +1509,23 @@ app.get("/v1/accounts/me", async (c) => {
 app.get("/v1/admin/summary", async (c) => {
   assertAdminRequest(c);
 
-  const [roomsResult, tenantsResult, passesResult, packages] = await Promise.all([
+  const [roomsResult, tenantsResult, passesResult, auditResult, packages, readiness] = await Promise.all([
     c.env.DB.prepare("SELECT * FROM rooms ORDER BY created_at DESC").all<RoomRecord>(),
     c.env.DB.prepare("SELECT * FROM tenants ORDER BY created_at DESC").all<TenantRecord>(),
     c.env.DB.prepare("SELECT * FROM room_passes ORDER BY created_at DESC").all<RoomPassRecord>(),
+    c.env.DB.prepare("SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT 25").all<AdminAuditRecord>()
+      .catch((): { results: AdminAuditRecord[] } => ({ results: [] })),
     getPackageCatalog(c),
+    buildProductionReadiness(c),
   ]);
   const rooms = (roomsResult.results ?? []).map(toRoomSummary);
   const tenants = tenantsResult.results ?? [];
   const roomPasses = passesResult.results ?? [];
 
   return jsonSuccess(c, {
+    auditLogs: auditResult.results ?? [],
     packages,
+    readiness,
     roomPasses,
     rooms,
     summary: {
@@ -1437,12 +1624,31 @@ app.patch("/v1/admin/packages/:id", async (c) => {
     JSON.stringify(nextPackage.features)
   ).run();
 
+  await recordAdminAudit(c, {
+    action: "package_update",
+    metadata: {
+      active: nextPackage.active,
+      max_cameras: nextPackage.max_cameras,
+      max_rooms: nextPackage.max_rooms,
+      price_cents: nextPackage.price_cents,
+      sort_order: nextPackage.sort_order,
+    },
+    targetId: nextPackage.id,
+    targetType: "package",
+  });
+
   return jsonSuccess(c, { package: nextPackage });
 });
 
 app.post("/v1/admin/room-passes/:id/approve", async (c) => {
   assertAdminRequest(c);
-  const room = await activateRoomPassById(c, c.req.param("id"));
+  const roomPassId = c.req.param("id");
+  const room = await activateRoomPassById(c, roomPassId);
+  await recordAdminAudit(c, {
+    action: "room_pass_approve",
+    targetId: roomPassId,
+    targetType: "room_pass",
+  });
   return jsonSuccess(c, { room: toRoomSummary(room) });
 });
 
@@ -1464,18 +1670,36 @@ app.post("/v1/admin/room-passes/:id/reject", async (c) => {
     "UPDATE rooms SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
   ).bind(roomPass.room_id).run();
 
+  await recordAdminAudit(c, {
+    action: "room_pass_reject",
+    targetId: roomPassId,
+    targetType: "room_pass",
+  });
+
   return jsonSuccess(c, { rejected: true });
 });
 
 app.post("/v1/admin/rooms/:id/start", async (c) => {
   assertAdminRequest(c);
-  const room = await startRoomSession(c, c.req.param("id"));
+  const roomId = c.req.param("id");
+  const room = await startRoomSession(c, roomId);
+  await recordAdminAudit(c, {
+    action: "room_start",
+    targetId: roomId,
+    targetType: "room",
+  });
   return jsonSuccess(c, { room: toRoomSummary(room) });
 });
 
 app.post("/v1/admin/rooms/:id/expire", async (c) => {
   assertAdminRequest(c);
-  const room = await expireRoomAccessNow(c, c.req.param("id"));
+  const roomId = c.req.param("id");
+  const room = await expireRoomAccessNow(c, roomId);
+  await recordAdminAudit(c, {
+    action: "room_expire",
+    targetId: roomId,
+    targetType: "room",
+  });
   return jsonSuccess(c, { room: toRoomSummary(room) });
 });
 
@@ -1859,6 +2083,8 @@ app.post("/rooms/:id/cameras", async (c) => {
   if (!body.id || !videoTrackName || !body.sessionId) {
     throw new HTTPException(400, { message: "id, videoTrackName, and sessionId are required" });
   }
+
+  await assertRoomCameraCapacity(c, roomId, body.id);
 
   await c.env.DB.prepare(
     "INSERT OR REPLACE INTO cameras (id, room_id, track_id, audio_track_id, session_id, is_active, last_seen_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)"

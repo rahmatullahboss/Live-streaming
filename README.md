@@ -82,6 +82,39 @@ ROOM_PASS_PRICE_CENTS=1500
 BKASH_MERCHANT_NUMBER=01700000000
 ```
 
+## Production Readiness Checklist
+
+The `/admin` dashboard includes a production readiness panel. Before sending real tenants through the system:
+
+```bash
+npx wrangler d1 migrations apply live-studio-db
+npx wrangler secret put ADMIN_EMAIL
+npx wrangler secret put ADMIN_PASSWORD
+npx wrangler secret put ADMIN_ACCESS_TOKEN
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put PUBLIC_GOOGLE_CLIENT_ID
+npx wrangler secret put CF_CALLS_APP_ID
+npx wrangler secret put CF_CALLS_APP_TOKEN
+npx wrangler secret put RELAY_WEBSOCKET_URL
+npx wrangler secret put RELAY_AUTH_SECRET
+```
+
+Configure at least one payment path:
+
+```bash
+npx wrangler secret put STRIPE_SECRET_KEY
+npx wrangler secret put STRIPE_WEBHOOK_SECRET
+```
+
+or:
+
+```bash
+npx wrangler secret put MANUAL_PAYMENT_ADMIN_TOKEN
+# plus BKASH_MERCHANT_NUMBER as a Worker variable/secret
+```
+
+Package camera limits are enforced when cameras register with a room, and admin package/payment/room actions are written to `admin_audit_logs` after migration `0012_admin_audit_logs.sql`.
+
 Stripe webhook endpoint:
 
 ```text
