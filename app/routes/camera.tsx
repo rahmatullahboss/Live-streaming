@@ -251,13 +251,9 @@ export default function CameraPublisher() {
 
     setNotice("Switching to landscape");
     const oldTrack = session.stream.getVideoTracks()[0];
-    const audioTrack = session.stream.getAudioTracks()[0] ?? null;
 
     try {
-      // Stop old video track
-      oldTrack.stop();
-
-      // Get new landscape stream
+      // Get new landscape stream first (before stopping old track)
       const newStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -270,6 +266,9 @@ export default function CameraPublisher() {
       });
       const newVideoTrack = newStream.getVideoTracks()[0];
 
+      // Stop old video track (safe now that we have the new track)
+      oldTrack.stop();
+
       // Replace track on SFU client
       await session.client.replaceTrack(newVideoTrack);
 
@@ -279,7 +278,6 @@ export default function CameraPublisher() {
       // Update UI state
       setIsLandscape(true);
       setNotice("Landscape mode active");
-      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to switch to landscape");
       setNotice("Rotation failed");
