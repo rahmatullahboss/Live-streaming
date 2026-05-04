@@ -6,6 +6,7 @@ import {
   CameraOff,
   Clipboard,
   ExternalLink,
+  Home,
   Languages,
   Loader2,
   Mic,
@@ -19,6 +20,8 @@ import {
   Video,
   WandSparkles,
 } from "lucide-react";
+
+import { Link } from "react-router";
 
 import { ScoreboardOverlay } from "~/components/scoreboard-overlay";
 import { LocalRelayBroadcaster } from "~/lib/local-relay";
@@ -400,7 +403,7 @@ export default function DirectorStudio() {
           });
         })
         .catch(() => undefined);
-    }, 2_000);
+    }, 1_000);
 
     return () => window.clearInterval(intervalId);
   }, [joinState]);
@@ -551,7 +554,7 @@ export default function DirectorStudio() {
     setSettingsError(null);
 
     try {
-      const accessToken = directorAccessToken.trim();
+      const accessToken = window.localStorage.getItem("live-studio-account-token") ?? "";
       if (!accessToken) {
         throw new Error("Director account access is required. Sign in from the home page first.");
       }
@@ -765,42 +768,40 @@ export default function DirectorStudio() {
                 {copy.studioHelp}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setLanguage((current) => (current === "bn" ? "en" : "bn"))}
-              className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)]"
-            >
-              <Languages size={14} />
-              {language === "bn" ? "EN" : "বাংলা"}
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                to="/dashboard"
+                className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)]"
+              >
+                <Home size={14} />
+                Dashboard
+              </Link>
+              <button
+                type="button"
+                onClick={() => setLanguage((current) => (current === "bn" ? "en" : "bn"))}
+                className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)]"
+              >
+                <Languages size={14} />
+                {language === "bn" ? "EN" : "বাংলা"}
+              </button>
+            </div>
           </div>
 
           <form onSubmit={handleJoin} className="space-y-4">
             <InputField
               label="Room PIN"
+              type="password"
               value={pin}
               tracking
               onChange={setPin}
               placeholder="123456"
-            />
-            <InputField
-              label="Director Name"
-              value={directorName}
-              onChange={setDirectorName}
-              placeholder="Match Director"
-            />
-            <InputField
-              label="Director Access Token"
-              value={directorAccessToken}
-              onChange={setDirectorAccessToken}
-              placeholder="Sign in on the home page first"
             />
 
             {error ? <ErrorBox message={error} /> : null}
 
             <button
               type="submit"
-              disabled={loading || pin.trim().length < 4 || !directorAccessToken.trim()}
+              disabled={loading || pin.trim().length < 4}
               className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-5 py-4 text-sm font-semibold text-[#041016] hover:scale-[1.01] disabled:opacity-60"
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : <BadgeCheck size={18} />}
@@ -826,6 +827,13 @@ export default function DirectorStudio() {
               </h1>
             </div>
             <div className="flex items-center gap-3">
+              <Link
+                to="/"
+                className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-semibold text-[var(--text-main)]"
+              >
+                <Home size={15} />
+                Home
+              </Link>
               <div className="rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm text-[var(--text-main)]">
                 {copy.pin} {joinState.room.pin}
               </div>

@@ -110,9 +110,29 @@ export function ScoreboardOverlay({ className = "", overlay }: ScoreboardOverlay
         />
       ) : null}
 
+      {/* Top-level logos positioned at the very top of the screen */}
+      {hasTopLogos ? (
+        <div className="flex w-full items-center justify-between gap-3">
+          {overlay.left_logo_url ? (
+            <img
+              src={overlay.left_logo_url}
+              alt="Left team logo"
+              className="h-12 w-12 rounded-xl border border-white/10 object-contain shadow-[0_10px_30px_rgba(0,0,0,0.35)] sm:h-14 sm:w-14"
+            />
+          ) : <div className="h-12 w-12 sm:h-14 sm:w-14" />}
+          {overlay.right_logo_url ? (
+            <img
+              src={overlay.right_logo_url}
+              alt="Right team logo"
+              className="h-12 w-12 rounded-xl border border-white/10 object-contain shadow-[0_10px_30px_rgba(0,0,0,0.35)] sm:h-14 sm:w-14"
+            />
+          ) : <div className="h-12 w-12 sm:h-14 sm:w-14" />}
+        </div>
+      ) : null}
+
       {showBuiltInScoreboard ? (
         <div
-          className={`w-full max-w-xl overflow-hidden rounded-[1.3rem] border px-2.5 py-2 shadow-[0_20px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:max-w-2xl sm:px-3 sm:py-3 ${theme.frame}`}
+          className={`mt-2 w-full max-w-xl overflow-hidden rounded-[1.3rem] border px-2.5 py-2 shadow-[0_20px_60px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:max-w-2xl sm:px-3 sm:py-3 ${theme.frame}`}
         >
           {overlay.sport === "cricket" ? (
             <CricketOverlayCard overlay={overlay} sponsorText={sponsorText} statusLabel={statusLabel} />

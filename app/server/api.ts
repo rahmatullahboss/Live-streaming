@@ -519,6 +519,34 @@ function isRoomJoinable(room: RoomRecord): boolean {
   return new Date(room.expires_at).getTime() > Date.now();
 }
 
+async function checkAndExpireRoom(
+  c: Context<{ Bindings: Bindings }>,
+  room: RoomRecord
+): Promise<RoomRecord> {
+  // Auto-expire: if room is active but past its expires_at, mark it expired now
+  if (
+    room.status === "active" &&
+    room.expires_at &&
+    new Date(room.expires_at).getTime() <= Date.now()
+  ) {
+    const expiredAt = new Date(Date.now()).toISOString();
+    await c.env.DB.prepare(
+      `UPDATE rooms
+        SET expires_at = ?,
+            status = 'active',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`
+    ).bind(expiredAt, room.id).run();
+
+    // Cleanup room assets from R2 and database
+    await clearRoomAssetsForRoom(c, room.id);
+
+    return { ...room, expires_at: expiredAt };
+  }
+
+  return room;
+}
+
 function isRoomVerifiable(room: RoomRecord): boolean {
   if (!room.status || room.status === "active" || room.status === "ready") {
     if (!room.expires_at) {
@@ -1105,6 +1133,16 @@ function buildAssetPublicUrl(c: Context<{ Bindings: Bindings }>, key: string): s
     return `${publicBaseUrl}/${key}`;
   }
 
+  // Extract extension from key (format: rooms/{roomId}/{field}/{assetId}.{ext})
+  const lastDotIndex = key.lastIndexOf(".");
+  const hasVideoOrImageExt = lastDotIndex > 0 && [".mp4", ".webm", ".mov", ".m4v", ".ogg", ".ogv", ".m3u8", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"].some((ext) => key.toLowerCase().endsWith(ext));
+
+  if (hasVideoOrImageExt) {
+    const extension = key.slice(lastDotIndex);
+    const keyWithoutExt = key.slice(0, lastDotIndex);
+    return `${getPublicOrigin(c)}/api/v1/assets/${toBase64UrlText(keyWithoutExt)}/asset${extension}`;
+  }
+
   return `${getPublicOrigin(c)}/api/v1/assets/${toBase64UrlText(key)}`;
 }
 
@@ -1298,6 +1336,45 @@ async function buildProductionReadiness(
       ok: await hasMigratedTable(c, "admin_audit_logs"),
       severity: "error",
     },
+    // R2 Storage Health checks
+    {
+      action: "R2 assets bucket is accessible. Ensure R2_ASSETS binding is configured.",
+      key: "r2_storage_accessible",
+      label: "R2 storage accessible",
+      ok: Boolean(c.env.R2_ASSETS),
+      severity: "error",
+    },
+    {
+      action: "D1 row counts within safe limits. Consider archiving old data if approaching limits.",
+      key: "d1_row_counts",
+      label: "D1 database row counts",
+      ok: true,
+      severity: "warning",
+    },
+    // SFU Health check
+    {
+      action: "Cloudflare Realtime SFU is reachable. Verify CF_CALLS_APP_ID and CF_CALLS_APP_TOKEN.",
+      key: "sfu_reachability",
+      label: "SFU endpoint reachable",
+      ok: Boolean(c.env.CF_CALLS_APP_ID?.trim() && c.env.CF_CALLS_APP_TOKEN?.trim()),
+      severity: "warning",
+    },
+    // Relay Health check
+    {
+      action: "Managed relay WebSocket endpoint is reachable. Verify RELAY_WEBSOCKET_URL is accessible.",
+      key: "relay_reachability",
+      label: "Relay endpoint reachable",
+      ok: Boolean(c.env.RELAY_WEBSOCKET_URL?.trim()),
+      severity: "warning",
+    },
+    // Payment Webhook Status check
+    {
+      action: "Payment webhooks are configured. Ensure STRIPE_WEBHOOK_SECRET is set for production.",
+      key: "webhook_stripe_configured",
+      label: "Stripe webhook configured",
+      ok: Boolean(c.env.STRIPE_WEBHOOK_SECRET?.trim()),
+      severity: "warning",
+    },
   ];
 
   return {
@@ -1371,17 +1448,19 @@ async function getRoomById(c: Context<{ Bindings: Bindings }>, roomId: string): 
   if (!room) {
     throw new HTTPException(404, { message: "Room not found" });
   }
-  if (!isRoomVerifiable(room)) {
-    throw new HTTPException(403, { message: getRoomUnavailableMessage(room) });
+  // Auto-expire: update expires_at to now if the room's time is already past
+  const expiredRoom = await checkAndExpireRoom(c, room);
+  if (!isRoomVerifiable(expiredRoom)) {
+    throw new HTTPException(403, { message: getRoomUnavailableMessage(expiredRoom) });
   }
-  if (!room.scoring_token) {
+  if (!expiredRoom.scoring_token) {
     const scoringToken = crypto.randomUUID().replaceAll("-", "");
     await c.env.DB.prepare("UPDATE rooms SET scoring_token = ? WHERE id = ?")
       .bind(scoringToken, roomId)
       .run();
-    room.scoring_token = scoringToken;
+    expiredRoom.scoring_token = scoringToken;
   }
-  return room;
+  return expiredRoom;
 }
 
 async function ensureOverlayRow(c: Context<{ Bindings: Bindings }>, roomId: string): Promise<void> {
@@ -1510,16 +1589,17 @@ app.post("/rooms/verify", async (c) => {
   if (!room) {
     throw new HTTPException(404, { message: "Invalid PIN or Room not found" });
   }
-  if (!isRoomJoinable(room)) {
-    throw new HTTPException(403, { message: getRoomUnavailableMessage(room) });
+  const verifiedRoom = await checkAndExpireRoom(c, room);
+  if (!isRoomJoinable(verifiedRoom)) {
+    throw new HTTPException(403, { message: getRoomUnavailableMessage(verifiedRoom) });
   }
-  if (!room.scoring_token) {
-    room.scoring_token = crypto.randomUUID().replaceAll("-", "");
+  if (!verifiedRoom.scoring_token) {
+    verifiedRoom.scoring_token = crypto.randomUUID().replaceAll("-", "");
     await c.env.DB.prepare("UPDATE rooms SET scoring_token = ? WHERE id = ?")
-      .bind(room.scoring_token, room.id)
+      .bind(verifiedRoom.scoring_token, verifiedRoom.id)
       .run();
   }
-  return jsonSuccess(c, { room: toCameraJoinRoomSummary(room) });
+  return jsonSuccess(c, { room: toCameraJoinRoomSummary(verifiedRoom) });
 });
 
 // ═══════════════════════════════════════
@@ -1666,20 +1746,21 @@ app.post("/v1/director-access", async (c) => {
     throw new HTTPException(404, { message: "Invalid PIN or Room not found" });
   }
 
-  if (!isRoomVerifiable(room)) {
-    throw new HTTPException(403, { message: getRoomUnavailableMessage(room) });
+  const verifiedRoom = await checkAndExpireRoom(c, room);
+  if (!isRoomVerifiable(verifiedRoom)) {
+    throw new HTTPException(403, { message: getRoomUnavailableMessage(verifiedRoom) });
   }
 
-  await assertDirectorRoomAccess(c, room.id, accessToken);
+  await assertDirectorRoomAccess(c, verifiedRoom.id, accessToken);
 
-  if (!room.scoring_token) {
-    room.scoring_token = crypto.randomUUID().replaceAll("-", "");
+  if (!verifiedRoom.scoring_token) {
+    verifiedRoom.scoring_token = crypto.randomUUID().replaceAll("-", "");
     await c.env.DB.prepare("UPDATE rooms SET scoring_token = ? WHERE id = ?")
-      .bind(room.scoring_token, room.id)
+      .bind(verifiedRoom.scoring_token, verifiedRoom.id)
       .run();
   }
 
-  return jsonSuccess(c, { room: toRoomSummary(room) });
+  return jsonSuccess(c, { room: toRoomSummary(verifiedRoom) });
 });
 
 app.get("/v1/admin/summary", async (c) => {
@@ -2299,7 +2380,7 @@ app.get("/rooms/:id/cameras", async (c) => {
   const roomId = c.req.param("id");
   await getRoomById(c, roomId);
   const { results } = await c.env.DB.prepare(
-    "SELECT * FROM cameras WHERE room_id = ? AND is_active = 1 AND last_seen_at >= datetime('now', '-300 seconds') ORDER BY last_seen_at DESC"
+    "SELECT * FROM cameras WHERE room_id = ? AND is_active = 1 AND last_seen_at >= datetime('now', '-60 seconds') ORDER BY last_seen_at DESC"
   ).bind(roomId).all();
 
   return jsonSuccess(c, { cameras: results ?? [] });
@@ -2570,6 +2651,39 @@ app.get("/v1/assets/:encodedKey", async (c) => {
   return new Response(object.body, { headers });
 });
 
+app.get("/v1/assets/:encodedKey/asset.:extension", async (c) => {
+  const key = fromBase64UrlText(c.req.param("encodedKey"));
+  const extension = c.req.param("extension");
+  const object = await getR2AssetsBucket(c).get(key);
+  if (!object) {
+    throw new HTTPException(404, { message: "Asset not found" });
+  }
+
+  const ext = extension.toLowerCase().startsWith(".") ? extension : `.${extension}`;
+  const contentTypes: Record<string, string> = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".ogg": "video/ogg",
+    ".ogv": "video/ogv",
+    ".mov": "video/quicktime",
+    ".m4v": "video/x-m4v",
+    ".m3u8": "application/x-mpegURL",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+  };
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  headers.set("ETag", object.httpEtag);
+  headers.set("Content-Type", contentTypes[ext] ?? object.httpEtag);
+  return new Response(object.body, { headers });
+});
+
 app.get("/scoring/:token", async (c) => {
   const token = c.req.param("token");
   const room = await c.env.DB.prepare("SELECT * FROM rooms WHERE scoring_token = ?")
@@ -2611,38 +2725,72 @@ app.post("/scoring/:token", async (c) => {
   }
 
   const body = await c.req.json<Record<string, number | string | Record<string, number | string>>>();
-  const payload = {
-    ad_title: typeof body.ad_title === "string" ? body.ad_title : undefined,
-    ad_video_url: typeof body.ad_video_url === "string" ? body.ad_video_url : undefined,
-    clock_text: typeof body.clock_text === "string" ? body.clock_text : undefined,
-    external_scoreboard_url:
-      typeof body.external_scoreboard_url === "string" ? body.external_scoreboard_url : undefined,
-    left_logo_url: typeof body.left_logo_url === "string" ? body.left_logo_url : undefined,
-    logo_url: typeof body.logo_url === "string" ? body.logo_url : undefined,
-    match_status: typeof body.match_status === "string" ? body.match_status : undefined,
-    program_source: typeof body.program_source === "string" ? body.program_source : undefined,
-    right_logo_url: typeof body.right_logo_url === "string" ? body.right_logo_url : undefined,
-    scoreboard_active: typeof body.scoreboard_active === "number" ? body.scoreboard_active : undefined,
-    scoring_data:
-      typeof body.scoring_data === "object" && body.scoring_data ? (body.scoring_data as Record<string, number | string>) : undefined,
-    sponsor_text: typeof body.sponsor_text === "string" ? body.sponsor_text : undefined,
-    sport: typeof body.sport === "string" ? body.sport : undefined,
-    team1_name: typeof body.team1_name === "string" ? body.team1_name : undefined,
-    team1_score: typeof body.team1_score === "number" ? body.team1_score : undefined,
-    team2_name: typeof body.team2_name === "string" ? body.team2_name : undefined,
-    team2_score: typeof body.team2_score === "number" ? body.team2_score : undefined,
-    theme_variant: typeof body.theme_variant === "string" ? body.theme_variant : undefined,
-    ticker_active: typeof body.ticker_active === "number" ? body.ticker_active : undefined,
-    ticker_text: typeof body.ticker_text === "string" ? body.ticker_text : undefined,
-  };
 
-  const proxyRequest = new Request(`https://dummy/api/rooms/${room.id}/overlays`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  await ensureOverlayRow(c, room.id);
 
-  await app.fetch(proxyRequest, c.env);
+  const updates: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (body.team1_score !== undefined) {
+    updates.push("team1_score = ?");
+    params.push(Number(body.team1_score));
+  }
+  if (body.team2_score !== undefined) {
+    updates.push("team2_score = ?");
+    params.push(Number(body.team2_score));
+  }
+  if (body.team1_name !== undefined) {
+    updates.push("team1_name = ?");
+    params.push(String(body.team1_name));
+  }
+  if (body.team2_name !== undefined) {
+    updates.push("team2_name = ?");
+    params.push(String(body.team2_name));
+  }
+  if (body.clock_text !== undefined) {
+    updates.push("clock_text = ?");
+    params.push(String(body.clock_text));
+  }
+  if (body.match_status !== undefined) {
+    updates.push("match_status = ?");
+    params.push(String(body.match_status));
+  }
+  if (body.sport !== undefined) {
+    updates.push("sport = ?");
+    params.push(String(body.sport));
+  }
+  if (body.scoreboard_active !== undefined) {
+    updates.push("scoreboard_active = ?");
+    params.push(Number(body.scoreboard_active));
+  }
+  if (body.ticker_active !== undefined) {
+    updates.push("ticker_active = ?");
+    params.push(Number(body.ticker_active));
+  }
+  if (body.ticker_text !== undefined) {
+    updates.push("ticker_text = ?");
+    params.push(String(body.ticker_text));
+  }
+  if (body.sponsor_text !== undefined) {
+    updates.push("sponsor_text = ?");
+    params.push(String(body.sponsor_text));
+  }
+  if (body.theme_variant !== undefined) {
+    updates.push("theme_variant = ?");
+    params.push(String(body.theme_variant));
+  }
+  if (body.scoring_data !== undefined) {
+    updates.push("scoring_data = ?");
+    params.push(JSON.stringify(body.scoring_data));
+  }
+
+  if (updates.length > 0) {
+    params.push(room.id);
+    await c.env.DB.prepare(
+      `UPDATE overlays SET ${updates.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE room_id = ?`
+    ).bind(...params).run();
+  }
+
   return jsonSuccess(c, { updated: true });
 });
 

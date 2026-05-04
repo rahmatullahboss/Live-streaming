@@ -16,7 +16,7 @@ export type PackageRecord = {
 export const DEFAULT_PACKAGES: PackageRecord[] = [
   {
     active: 1,
-    currency: "usd",
+    currency: "bdt",
     description: "Single match access for small clubs and schools.",
     duration_minutes: 180,
     features: ["1 live room", "3 camera phones", "1 ad video", "R2 logo assets", "External overlay link"],
@@ -25,12 +25,12 @@ export const DEFAULT_PACKAGES: PackageRecord[] = [
     max_cameras: 3,
     max_rooms: 1,
     name: "Starter Live",
-    price_cents: 1500,
+    price_cents: 15000,
     sort_order: 10,
   },
   {
     active: 1,
-    currency: "usd",
+    currency: "bdt",
     description: "Longer match-day coverage with sponsor graphics.",
     duration_minutes: 360,
     features: ["2 live rooms", "5 camera phones", "2 ad videos", "Sponsor graphics", "Ad/promo mode"],
@@ -39,12 +39,12 @@ export const DEFAULT_PACKAGES: PackageRecord[] = [
     max_cameras: 5,
     max_rooms: 2,
     name: "Matchday Pro",
-    price_cents: 3500,
+    price_cents: 35000,
     sort_order: 20,
   },
   {
     active: 1,
-    currency: "usd",
+    currency: "bdt",
     description: "Production package for organizations running multiple events.",
     duration_minutes: 720,
     features: ["5 live rooms", "8 camera phones", "3 ad videos", "Priority admin review", "Team branding controls"],
@@ -53,7 +53,7 @@ export const DEFAULT_PACKAGES: PackageRecord[] = [
     max_cameras: 8,
     max_rooms: 5,
     name: "Season Ops",
-    price_cents: 9900,
+    price_cents: 99000,
     sort_order: 30,
   },
 ];
@@ -79,8 +79,8 @@ export function formatPackagePrice({
   amountCents: number;
   currency: string;
 }): string {
-  const normalizedCurrency = currency.toLowerCase();
   const amount = amountCents / 100;
+  const normalizedCurrency = currency.toLowerCase();
 
   if (normalizedCurrency === "bdt") {
     return `\u09f3${new Intl.NumberFormat("en-US", {

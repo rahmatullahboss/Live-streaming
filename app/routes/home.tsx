@@ -5,6 +5,7 @@ import {
   Clock3,
   CreditCard,
   Loader2,
+  LogOut,
   RefreshCcw,
   ShieldCheck,
   Smartphone,
@@ -79,11 +80,11 @@ export default function Home() {
   const [packages, setPackages] = useState<StreamingPackage[]>([]);
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
-  const [selectedPackageId, setবাছাই করা হয়েছেPackageId] = useState("starter-live");
+  const [selectedPackageId, setSelectedPackageId] = useState("starter-live");
   const [roomName, setRoomName] = useState("");
   const [accountName, setAccountName] = useState("");
-  const [customerইমেইল, setCustomerইমেইল] = useState("");
-  const [customerফোন, setCustomerফোন] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [bkashSenderNumber, setBkashSenderNumber] = useState("");
   const [bkashTransactionId, setBkashTransactionId] = useState("");
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -107,7 +108,7 @@ export default function Home() {
 
     const accessToken = window.localStorage.getItem("live-studio-account-token");
     if (accessToken) {
-      void hydrateAccount(accessToken);
+      window.location.href = "/dashboard";
     }
   }, []);
 
@@ -174,7 +175,7 @@ export default function Home() {
       setPackages(packageList);
       setAuthConfig(config);
       setPaymentConfig(payments);
-      setবাছাই করা হয়েছেPackageId(packageList[0]?.id ?? "starter-live");
+      setSelectedPackageId(packageList[0]?.id ?? "starter-live");
     } catch (loadError: unknown) {
       setError(loadError instanceof Error ? loadError.message : "Could not load pricing");
     } finally {
@@ -188,8 +189,8 @@ export default function Home() {
       setAccount({ ...dashboard.account, accessToken });
       setRooms(dashboard.rooms);
       setPasses(dashboard.passes);
-      setCustomerইমেইল(dashboard.account.email);
-      setCustomerফোন(dashboard.account.phone);
+      setCustomerEmail(dashboard.account.email);
+      setCustomerPhone(dashboard.account.phone);
       setAccountName(dashboard.account.name);
     } catch {
       window.localStorage.removeItem("live-studio-account-token");
@@ -210,14 +211,23 @@ export default function Home() {
       const result = await signInWithGoogleCredential(response.credential);
       if (result.account.accessToken) {
         window.localStorage.setItem("live-studio-account-token", result.account.accessToken);
-        await hydrateAccount(result.account.accessToken);
+        window.location.href = "/dashboard";
       }
-      setNotice("Google account connected. Choose a package to continue.");
     } catch (authError: unknown) {
       setError(authError instanceof Error ? authError.message : "Could not sign in with Google");
     } finally {
       setAuthLoading(false);
     }
+  }
+
+  function handleLogout() {
+    window.localStorage.removeItem("live-studio-account-token");
+    setAccount(null);
+    setRooms([]);
+    setPasses([]);
+    setAccountName("");
+    setCustomerEmail("");
+    setCustomerPhone("");
   }
 
   async function ensureAccount(): Promise<AccountSummary> {
@@ -226,9 +236,9 @@ export default function Home() {
     }
 
     const created = await createAccount({
-      email: customerইমেইল,
+      email: customerEmail,
       name: accountName,
-      phone: customerফোন,
+      phone: customerPhone,
     });
     const accessToken = created.account.accessToken ?? "";
     window.localStorage.setItem("live-studio-account-token", accessToken);
@@ -276,7 +286,7 @@ export default function Home() {
         },
         ...current,
       ]);
-      setNotice("Payment submitted. Admin approval unlocks the room.");
+      window.location.href = "/dashboard";
     } catch (paymentError: unknown) {
       setError(paymentError instanceof Error ? paymentError.message : "Could not submit bKash payment");
     } finally {
@@ -297,7 +307,7 @@ export default function Home() {
       const activeAccount = await ensureAccount();
       const checkout = await createRoomPassCheckout({
         accessToken: activeAccount.accessToken,
-        customerইমেইল: activeAccount.email || customerইমেইল,
+        customerEmail: activeAccount.email || customerEmail,
         packageId: selectedPackage.id,
         roomName,
       });
@@ -326,6 +336,9 @@ export default function Home() {
           </Link>
 
           <nav className="flex flex-wrap items-center gap-2">
+            <Link className="rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-medium text-[var(--text-main)]" to="/dashboard">
+              Dashboard
+            </Link>
             <Link className="rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-medium text-[var(--text-main)]" to="/watch">
               Watch
             </Link>
@@ -335,6 +348,16 @@ export default function Home() {
             <Link className="rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-medium text-[var(--text-main)]" to="/admin">
               Admin
             </Link>
+            {account && (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-medium text-[var(--text-main)]"
+              >
+                <LogOut size={16} />
+                Logout
+              </button>
+            )}
           </nav>
         </header>
 
@@ -386,7 +409,7 @@ export default function Home() {
                     <p data-display className="mt-5 text-3xl font-bold text-[var(--text-main)]">
                       {formatPackagePrice({ amountCents: item.price_cents, currency: item.currency })}
                     </p>
-                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] leading-tight">
                       {item.duration_minutes} মিনিট · {item.max_cameras} ক্যাম
                     </p>
                     <ul className="mt-4 space-y-2">
@@ -399,7 +422,7 @@ export default function Home() {
                     </ul>
                     <button
                       type="button"
-                      onClick={() => setবাছাই করা হয়েছেPackageId(item.id)}
+                      onClick={() => setSelectedPackageId(item.id)}
                       className="mt-5 w-full rounded-full border border-[var(--border-soft)] px-4 py-3 text-sm font-semibold text-[var(--text-main)]"
                     >
                       {selectedPackageId === item.id ? "বাছাই করা হয়েছে" : "প্যাকেজ বাছাই করুন"}
@@ -450,8 +473,8 @@ export default function Home() {
 
               <form onSubmit={handleManualPayment} className="space-y-3">
                 <InputField label="অ্যাকাউন্ট নাম" onChange={setAccountName} required value={accountName} placeholder="City Club" />
-                <InputField label="ইমেইল" onChange={setCustomerইমেইল} required type="email" value={customerইমেইল} placeholder="club@example.com" />
-                <InputField label="ফোন" onChange={setCustomerফোন} required type="tel" value={customerফোন} placeholder="01711111111" />
+                <InputField label="ইমেইল" onChange={setCustomerEmail} required type="email" value={customerEmail} placeholder="club@example.com" />
+                <InputField label="ফোন" onChange={setCustomerPhone} required type="tel" value={customerPhone} placeholder="01711111111" />
                 <InputField label="ম্যাচ / রুমের নাম" onChange={setRoomName} required value={roomName} placeholder="Friday Night Match" />
 
                 <div className="rounded-[1.2rem] border border-[var(--border-soft)] bg-black/15 p-4">

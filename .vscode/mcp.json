@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "brainsync": {
+      "command": "node",
+      "args": [
+        "/Users/rahmatullahzisan/.antigravity/extensions/dawoodahmad.brainsync-3.0.12-universal/dist/mcp-server.js"
+      ],
+      "type": "stdio",
+      "env": {
+        "BRAINSYNC_ENV_FILE": "/Users/rahmatullahzisan/.bsync_core/live-streaming/mcp-secret-env.json"
+      }
+    }
+  }
+}
