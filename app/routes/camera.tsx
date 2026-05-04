@@ -419,16 +419,16 @@ export default function CameraPublisher() {
                 onClick={toggleVideo}
               />
               <IconButton
-                active={isLandscape}
-                icon={<RotateCw size={18} />}
-                label={isLandscape ? "Landscape" : "Rotate"}
-                onClick={() => void handleRotation()}
-              />
-              <IconButton
                 active={false}
                 icon={<PhoneOff size={18} />}
                 label="Leave"
                 onClick={() => void disconnect()}
+              />
+              <IconButton
+                active={isLandscape}
+                icon={<RotateCw size={18} />}
+                label={isLandscape ? "Landscape" : "Rotate"}
+                onClick={() => void handleRotation()}
               />
             </div>
           </div>
