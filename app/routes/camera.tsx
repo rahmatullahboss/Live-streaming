@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
 import {
   Camera,
   CameraOff,
@@ -6,6 +7,7 @@ import {
   Mic,
   MicOff,
   PhoneOff,
+  RotateCw,
   ShieldCheck,
   Signal,
   Video,
@@ -30,7 +32,8 @@ type CameraSession = {
 };
 
 export default function CameraPublisher() {
-  const [pin, setPin] = useState("");
+  const [searchParams] = useSearchParams();
+  const [pin, setPin] = useState(searchParams.get("pin") ?? "");
   const [operatorName, setOperatorName] = useState("Field Camera");
   const [session, setSession] = useState<CameraSession | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,6 +41,7 @@ export default function CameraPublisher() {
   const [notice, setNotice] = useState<string>("Standby");
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
+  const [isLandscape, setIsLandscape] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const heartbeatRef = useRef<number | null>(null);
@@ -242,6 +246,46 @@ export default function CameraPublisher() {
     setVideoEnabled(next);
   }
 
+  async function handleRotation() {
+    if (!session) return;
+
+    setNotice("Switching to landscape");
+    const oldTrack = session.stream.getVideoTracks()[0];
+    const audioTrack = session.stream.getAudioTracks()[0] ?? null;
+
+    try {
+      // Stop old video track
+      oldTrack.stop();
+
+      // Get new landscape stream
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+        video: {
+          ...getCameraPublishConstraints(),
+          facingMode: { ideal: "environment" },
+        },
+      });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+
+      // Replace track on SFU client
+      await session.client.replaceTrack(newVideoTrack);
+
+      // Update session stream reference
+      setSession((prev) => prev ? { ...prev, stream: newStream } : null);
+
+      // Update UI state
+      setIsLandscape(true);
+      setNotice("Landscape mode active");
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to switch to landscape");
+      setNotice("Rotation failed");
+    }
+  }
+
   if (!session) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-lg items-center px-4 py-8 sm:px-6">
@@ -358,6 +402,7 @@ export default function CameraPublisher() {
               <MiniPanel label="Video" value={videoEnabled ? "On" : "Off"} />
               <MiniPanel label="Audio" value={audioEnabled ? "On" : "Off"} />
               <MiniPanel label="SFU" value="Live" />
+              <MiniPanel label="Orientation" value={isLandscape ? "Landscape" : "Portrait"} />
             </div>
 
             <div className="grid grid-cols-3 gap-3">
@@ -372,6 +417,12 @@ export default function CameraPublisher() {
                 icon={videoEnabled ? <Video size={18} /> : <CameraOff size={18} />}
                 label={videoEnabled ? "Camera On" : "Camera Off"}
                 onClick={toggleVideo}
+              />
+              <IconButton
+                active={isLandscape}
+                icon={<RotateCw size={18} />}
+                label={isLandscape ? "Landscape" : "Rotate"}
+                onClick={() => void handleRotation()}
               />
               <IconButton
                 active={false}
