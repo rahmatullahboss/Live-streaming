@@ -45,6 +45,7 @@ export default function CameraPublisher() {
   const [currentOrientation, setCurrentOrientation] = useState<"portrait" | "landscape">("portrait");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const isManualRotationRef = useRef(false);
   const heartbeatRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -145,6 +146,12 @@ export default function CameraPublisher() {
     }
 
     async function applyOrientationConstraints() {
+      // Skip if manual rotation was just clicked - don't override user's choice
+      if (isManualRotationRef.current) {
+        isManualRotationRef.current = false;
+        return;
+      }
+
       const orientation = getOrientation();
       const landscape = orientation === "landscape";
 
@@ -286,6 +293,9 @@ export default function CameraPublisher() {
 
   async function handleRotation() {
     if (!session) return;
+
+    // Flag: prevent orientationchange from overriding manual rotation
+    isManualRotationRef.current = true;
 
     const targetLandscape = !isLandscape;
     setNotice(targetLandscape ? "Switching to landscape" : "Switching to portrait");
