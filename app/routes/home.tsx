@@ -66,11 +66,11 @@ declare global {
 
 export function meta(_: Route.MetaArgs) {
   return [
-    { title: "Kinetic Command | Live Streaming Packages" },
+    { title: "Overlays | মাল্টি-ক্যাম লাইভ স্টুডিও" },
     {
       name: "description",
       content:
-        "Create a live streaming account, choose a package, and unlock a multi-camera director room after payment.",
+        "বাংলাদেশের স্কুল ফুটবল ও ক্রিকেট ম্যাচ লাইভ স্ট্রিম করুন — মাত্র ১৫০ টাকায়। ৩টা ফোন দিয়ে প্রফেশনাল মাল্টি-ক্যাম প্রোডাকশন।",
     },
   ];
 }
@@ -79,11 +79,11 @@ export default function Home() {
   const [packages, setPackages] = useState<StreamingPackage[]>([]);
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
-  const [selectedPackageId, setSelectedPackageId] = useState("starter-live");
+  const [selectedPackageId, setবাছাই করা হয়েছেPackageId] = useState("starter-live");
   const [roomName, setRoomName] = useState("");
   const [accountName, setAccountName] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerইমেইল, setCustomerইমেইল] = useState("");
+  const [customerফোন, setCustomerফোন] = useState("");
   const [bkashSenderNumber, setBkashSenderNumber] = useState("");
   const [bkashTransactionId, setBkashTransactionId] = useState("");
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -174,7 +174,7 @@ export default function Home() {
       setPackages(packageList);
       setAuthConfig(config);
       setPaymentConfig(payments);
-      setSelectedPackageId(packageList[0]?.id ?? "starter-live");
+      setবাছাই করা হয়েছেPackageId(packageList[0]?.id ?? "starter-live");
     } catch (loadError: unknown) {
       setError(loadError instanceof Error ? loadError.message : "Could not load pricing");
     } finally {
@@ -188,8 +188,8 @@ export default function Home() {
       setAccount({ ...dashboard.account, accessToken });
       setRooms(dashboard.rooms);
       setPasses(dashboard.passes);
-      setCustomerEmail(dashboard.account.email);
-      setCustomerPhone(dashboard.account.phone);
+      setCustomerইমেইল(dashboard.account.email);
+      setCustomerফোন(dashboard.account.phone);
       setAccountName(dashboard.account.name);
     } catch {
       window.localStorage.removeItem("live-studio-account-token");
@@ -226,9 +226,9 @@ export default function Home() {
     }
 
     const created = await createAccount({
-      email: customerEmail,
+      email: customerইমেইল,
       name: accountName,
-      phone: customerPhone,
+      phone: customerফোন,
     });
     const accessToken = created.account.accessToken ?? "";
     window.localStorage.setItem("live-studio-account-token", accessToken);
@@ -297,13 +297,13 @@ export default function Home() {
       const activeAccount = await ensureAccount();
       const checkout = await createRoomPassCheckout({
         accessToken: activeAccount.accessToken,
-        customerEmail: activeAccount.email || customerEmail,
+        customerইমেইল: activeAccount.email || customerইমেইল,
         packageId: selectedPackage.id,
         roomName,
       });
       window.location.href = checkout.checkoutUrl;
     } catch (checkoutError: unknown) {
-      setError(checkoutError instanceof Error ? checkoutError.message : "Could not start Stripe checkout");
+      setError(checkoutError instanceof Error ? checkoutError.message : "Could not start স্ট্রিপ চেকআউট");
     } finally {
       setCheckoutLoading(false);
     }
@@ -315,13 +315,13 @@ export default function Home() {
         <header className="glass-panel mb-6 flex flex-wrap items-center justify-between gap-3 rounded-full px-4 py-3">
           <Link to="/" className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-cyan)]/15 text-sm font-semibold text-[var(--accent-cyan)]">
-              KC
+              OL
             </div>
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--text-main)]">
-                Kinetic Command
+                Overlays
               </p>
-              <p className="text-xs text-[var(--text-muted)]">Multi-tenant live studio</p>
+              <p className="text-xs text-[var(--text-muted)]">মাল্টি-ক্যাম লাইভ স্টুডিও</p>
             </div>
           </Link>
 
@@ -343,21 +343,21 @@ export default function Home() {
             <div className="mb-6">
               <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--accent-lime)]/25 bg-[var(--accent-lime)]/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent-lime)]">
                 <Video size={14} />
-                Packages & pricing
+                প্যাকেজ ও মূল্য
               </div>
               <h1 data-display className="max-w-4xl text-4xl font-bold tracking-tight text-[var(--text-main)] sm:text-5xl">
-                Buy a package, unlock a live production room.
+                একটা প্যাকেজ কিনুন, লাইভ প্রোডাকশন রুম খুলুন।
               </h1>
               <p className="mt-4 max-w-3xl text-base leading-7 text-[var(--text-muted)]">
-                Every tenant gets isolated rooms, payment tracking, director access, and room-level graphics.
+                বাংলাদেশের স্কুল ফুটবল ও ক্রিকেট ম্যাচ এখন আপনার পকেটে — মাল্টি-ক্যাম স্ট্রিমিং মাত্র ১৫০ টাকায়।
               </p>
             </div>
 
             {loadingCatalog ? (
-              <StatePanel icon={<Loader2 className="animate-spin text-[var(--accent-cyan)]" size={24} />} text="Loading packages..." />
+              <StatePanel icon={<Loader2 className="animate-spin text-[var(--accent-cyan)]" size={24} />} text="প্যাকেজ লোড হচ্ছে..." />
             ) : error && packages.length === 0 ? (
               <StatePanel
-                action={<button type="button" onClick={() => void loadInitialState()} className="mt-4 inline-flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-semibold text-[var(--text-main)]"><RefreshCcw size={16} />Retry</button>}
+                action={<button type="button" onClick={() => void loadInitialState()} className="mt-4 inline-flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-semibold text-[var(--text-main)]"><RefreshCcw size={16} />পুনরায় চেষ্টা করুন</button>}
                 icon={<ShieldCheck className="text-[var(--accent-coral)]" size={28} />}
                 text={error}
               />
@@ -387,7 +387,7 @@ export default function Home() {
                       {formatPackagePrice({ amountCents: item.price_cents, currency: item.currency })}
                     </p>
                     <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                      {item.duration_minutes} minutes · {item.max_cameras} cameras
+                      {item.duration_minutes} মিনিট · {item.max_cameras} ক্যাম
                     </p>
                     <ul className="mt-4 space-y-2">
                       {item.features.map((feature) => (
@@ -399,10 +399,10 @@ export default function Home() {
                     </ul>
                     <button
                       type="button"
-                      onClick={() => setSelectedPackageId(item.id)}
+                      onClick={() => setবাছাই করা হয়েছেPackageId(item.id)}
                       className="mt-5 w-full rounded-full border border-[var(--border-soft)] px-4 py-3 text-sm font-semibold text-[var(--text-main)]"
                     >
-                      {selectedPackageId === item.id ? "Selected" : "Choose package"}
+                      {selectedPackageId === item.id ? "বাছাই করা হয়েছে" : "প্যাকেজ বাছাই করুন"}
                     </button>
                   </article>
                 ))}
@@ -415,10 +415,10 @@ export default function Home() {
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                   <h2 data-display className="text-xl font-semibold text-[var(--text-main)]">
-                    Account & checkout
+                    অ্যাকাউন্ট ও চেকআউট
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
-                    Sign in, name the room, then pay by Stripe or submit bKash for review.
+                    রুমের নাম দিন, বিকাশ বা স্ট্রিপে পে করুন।
                   </p>
                 </div>
                 <Smartphone className="text-[var(--accent-cyan)]" size={20} />
@@ -436,7 +436,7 @@ export default function Home() {
                       <div ref={googleButtonRef} />
                       {authLoading ? (
                         <p className="mt-3 flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                          <Loader2 className="animate-spin" size={14} /> Connecting Google account...
+                          <Loader2 className="animate-spin" size={14} /> গুগল অ্যাকাউন্ট সংযুক্ত হচ্ছে...
                         </p>
                       ) : null}
                     </div>
@@ -449,21 +449,21 @@ export default function Home() {
               )}
 
               <form onSubmit={handleManualPayment} className="space-y-3">
-                <InputField label="Account name" onChange={setAccountName} required value={accountName} placeholder="City Club" />
-                <InputField label="Email" onChange={setCustomerEmail} required type="email" value={customerEmail} placeholder="club@example.com" />
-                <InputField label="Phone" onChange={setCustomerPhone} required type="tel" value={customerPhone} placeholder="01711111111" />
-                <InputField label="Match / room name" onChange={setRoomName} required value={roomName} placeholder="Friday Night Match" />
+                <InputField label="অ্যাকাউন্ট নাম" onChange={setAccountName} required value={accountName} placeholder="City Club" />
+                <InputField label="ইমেইল" onChange={setCustomerইমেইল} required type="email" value={customerইমেইল} placeholder="club@example.com" />
+                <InputField label="ফোন" onChange={setCustomerফোন} required type="tel" value={customerফোন} placeholder="01711111111" />
+                <InputField label="ম্যাচ / রুমের নাম" onChange={setRoomName} required value={roomName} placeholder="Friday Night Match" />
 
                 <div className="rounded-[1.2rem] border border-[var(--border-soft)] bg-black/15 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent-lime)]">
-                    Manual bKash
+                    ম্যানুয়াল বিকাশ
                   </p>
                   <p className="mt-2 text-sm text-[var(--text-muted)]">
                     Merchant: {paymentConfig?.bkashMerchantNumber ?? "configured merchant number"}
                   </p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <InputField label="bKash sender" onChange={setBkashSenderNumber} required type="tel" value={bkashSenderNumber} placeholder="01722222222" />
-                    <InputField label="bKash TrxID" onChange={(value) => setBkashTransactionId(value.toUpperCase())} required value={bkashTransactionId} placeholder="BKASH12345" />
+                    <InputField label="বিকাশ প্রেরক" onChange={setBkashSenderNumber} required type="tel" value={bkashSenderNumber} placeholder="01722222222" />
+                    <InputField label="বিকাশ ট্রানজেকশন আইডি" onChange={(value) => setBkashTransactionId(value.toUpperCase())} required value={bkashTransactionId} placeholder="BKASH12345" />
                   </div>
                 </div>
 
@@ -477,7 +477,7 @@ export default function Home() {
                     className="flex items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-4 py-3 text-sm font-semibold text-[#041016] disabled:opacity-60"
                   >
                     {checkoutLoading ? <Loader2 className="animate-spin" size={16} /> : <Smartphone size={16} />}
-                    Submit bKash
+                    বিকাশে পে করুন
                   </button>
                   <button
                     type="button"
@@ -486,7 +486,7 @@ export default function Home() {
                     className="flex items-center justify-center gap-2 rounded-full border border-[var(--border-strong)] px-4 py-3 text-sm font-semibold text-[var(--text-main)] disabled:opacity-60"
                   >
                     <CreditCard size={16} />
-                    Stripe checkout
+                    স্ট্রিপ চেকআউট
                   </button>
                 </div>
               </form>

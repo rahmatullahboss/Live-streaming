@@ -88,7 +88,7 @@ export function ScoreboardOverlay({ className = "", overlay }: ScoreboardOverlay
   const externalScoreboardUrl = overlay.external_scoreboard_url?.trim() ?? "";
   const showScoreboard = overlay.scoreboard_active === 1;
   const showExternalScoreboard = showScoreboard && Boolean(externalScoreboardUrl);
-  const showBuiltInScoreboard = showScoreboard && !showExternalScoreboard;
+  const showBuiltInScoreboard = showScoreboard;
   const hasTopLogos = Boolean(overlay.left_logo_url || overlay.right_logo_url);
   const sponsorText = overlay.sponsor_text?.trim() ?? "";
   const statusLabel = overlay.match_status?.trim() || "LIVE";
