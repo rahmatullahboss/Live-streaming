@@ -479,4 +479,18 @@ export class CloudflareSFUClient {
     this.operationChain = run.catch(() => undefined);
     return run;
   }
+
+  async replaceTrack(newVideoTrack: MediaStreamTrack): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const videoSender = this.pc.getSenders().find((s) => s.track?.kind === "video");
+      if (!videoSender) {
+        throw new Error("[SFU] No video sender found to replace track");
+      }
+      await videoSender.replaceTrack(newVideoTrack);
+      console.log("[SFU] Video track replaced");
+      this.diagnostics.info("track-replaced", {
+        trackId: newVideoTrack.id,
+      });
+    });
+  }
 }
