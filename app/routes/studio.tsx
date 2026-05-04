@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import {
   AlertTriangle,
   BadgeCheck,
   Camera,
   CameraOff,
+  Clipboard,
+  ExternalLink,
   Languages,
   Loader2,
   Mic,
@@ -22,6 +24,11 @@ import { ScoreboardOverlay } from "~/components/scoreboard-overlay";
 import { LocalRelayBroadcaster } from "~/lib/local-relay";
 import { getAdVideoUrlIssue } from "~/lib/ad-video";
 import {
+  CAMERA_CROSSFADE_MS,
+  getCameraCrossfadeOpacity,
+  getProgramMediaPolicy,
+} from "~/lib/mixer/program-mixer";
+import {
   getStreamGuardState,
   type StudioVisibilityState,
 } from "~/lib/stream-guard";
@@ -33,11 +40,13 @@ import {
   saveOverlayConfig,
   startRoomSession,
   deleteRoomAsset,
+  getRoomAssets,
   uploadRoomAsset,
   type BroadcastDestinationConfig,
   type OverlayConfig,
+  type RoomAssetSummary,
   type RoomSummary,
-  verifyRoomPin,
+  verifyDirectorAccess,
 } from "~/lib/realtime";
 import { CloudflareSFUClient, type RemoteTrackRequest } from "~/lib/sfu";
 import { getRoomCameras } from "~/lib/sfu-room";
@@ -106,6 +115,8 @@ const studioCopy: Record<
     adMode: string;
     adPromo: string;
     adTitle: string;
+    adVideoUpload: string;
+    adVideoSlots: string;
     adVideoUrl: string;
     cameraPool: string;
     cameras: string;
@@ -158,6 +169,8 @@ const studioCopy: Record<
     adMode: "অ্যাড মোড",
     adPromo: "অ্যাড / প্রোমো",
     adTitle: "অ্যাডের শিরোনাম",
+    adVideoUpload: "অ্যাড ভিডিও আপলোড",
+    adVideoSlots: "আপলোড করা অ্যাড",
     adVideoUrl: "অ্যাড ভিডিও URL",
     cameraPool: "ক্যামেরা পুল",
     cameras: "ক্যামেরা",
@@ -209,6 +222,8 @@ const studioCopy: Record<
     adMode: "Ad Mode",
     adPromo: "Ad / Promo",
     adTitle: "Ad Title",
+    adVideoUpload: "Upload Ad Video",
+    adVideoSlots: "Uploaded Ads",
     adVideoUrl: "Ad Video URL",
     cameraPool: "Camera Pool",
     cameras: "Cameras",
@@ -273,6 +288,7 @@ function getStudioVisibilityState(): StudioVisibilityState {
 export default function DirectorStudio() {
   const [language, setLanguage] = useState<StudioLanguage>("bn");
   const [pin, setPin] = useState("");
+  const [directorAccessToken, setDirectorAccessToken] = useState("");
   const [directorName, setDirectorName] = useState("Director");
   const [joinState, setJoinState] = useState<JoinState | null>(null);
   const [destinations, setDestinations] = useState<BroadcastDestinationConfig[]>(defaultDestinations);
@@ -302,6 +318,13 @@ export default function DirectorStudio() {
   const pullingIdsRef = useRef<Set<string>>(new Set());
   const relayBroadcastersRef = useRef<LocalRelayBroadcaster[]>([]);
   const copy = studioCopy[language];
+
+  useEffect(() => {
+    const storedToken = window.localStorage.getItem("live-studio-account-token");
+    if (storedToken) {
+      setDirectorAccessToken(storedToken);
+    }
+  }, []);
 
   const activeOutputs = destinations
     .filter((destination) => destination.rtmpUrl.trim() && destination.streamKey.trim())
@@ -528,10 +551,18 @@ export default function DirectorStudio() {
     setSettingsError(null);
 
     try {
-      const verifiedRoom = await verifyRoomPin(pin.trim());
+      const accessToken = directorAccessToken.trim();
+      if (!accessToken) {
+        throw new Error("Director account access is required. Sign in from the home page first.");
+      }
+
+      const verifiedRoom = await verifyDirectorAccess({
+        accessToken,
+        pin: pin.trim(),
+      });
       const room =
         verifiedRoom.status === "ready"
-          ? await startRoomSession(verifiedRoom.id)
+          ? await startRoomSession(verifiedRoom.id, accessToken)
           : verifiedRoom;
       setJoinState({ room });
       setSettingsLoading(true);
@@ -758,12 +789,18 @@ export default function DirectorStudio() {
               onChange={setDirectorName}
               placeholder="Match Director"
             />
+            <InputField
+              label="Director Access Token"
+              value={directorAccessToken}
+              onChange={setDirectorAccessToken}
+              placeholder="Sign in on the home page first"
+            />
 
             {error ? <ErrorBox message={error} /> : null}
 
             <button
               type="submit"
-              disabled={loading || pin.trim().length < 4}
+              disabled={loading || pin.trim().length < 4 || !directorAccessToken.trim()}
               className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-5 py-4 text-sm font-semibold text-[#041016] hover:scale-[1.01] disabled:opacity-60"
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : <BadgeCheck size={18} />}
@@ -1053,22 +1090,47 @@ function ProgramMixer({
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const liveVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previousLiveVideoRef = useRef<HTMLVideoElement | null>(null);
   const adVideoRef = useRef<HTMLVideoElement | null>(null);
   const canvasCaptureTrackRef = useRef<RequestableCanvasTrack | null>(null);
   const renderTimerRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const monitorGainRef = useRef<GainNode | null>(null);
-  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const liveAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const adAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const adAudioElementRef = useRef<HTMLVideoElement | null>(null);
+  const cameraFadeStartRef = useRef<number | null>(null);
   const logoImagesRef = useRef<{ left: HTMLImageElement | null; right: HTMLImageElement | null }>({
     left: null,
     right: null,
   });
+  const mediaPolicy = useMemo(
+    () =>
+      getProgramMediaPolicy({
+        adVideoUrl,
+        programSource: overlay.program_source,
+      }),
+    [adVideoUrl, overlay.program_source]
+  );
 
   useEffect(() => {
     const video = liveVideoRef.current;
+    const previousVideo = previousLiveVideoRef.current;
     if (!video) {
       return;
+    }
+
+    const previousStream = video.srcObject instanceof MediaStream ? video.srcObject : null;
+    if (previousVideo && previousStream && selectedStream && previousStream !== selectedStream) {
+      previousVideo.srcObject = previousStream;
+      void previousVideo.play().catch(() => undefined);
+      cameraFadeStartRef.current = performance.now();
+    } else if (!selectedStream) {
+      cameraFadeStartRef.current = null;
+      if (previousVideo) {
+        previousVideo.srcObject = null;
+      }
     }
 
     video.srcObject = selectedStream;
@@ -1149,24 +1211,76 @@ function ProgramMixer({
       return;
     }
 
-    audioSourceRef.current?.disconnect();
-    audioSourceRef.current = null;
+    liveAudioSourceRef.current?.disconnect();
+    liveAudioSourceRef.current = null;
 
-    if (selectedStream && selectedStream.getAudioTracks().length > 0) {
+    if (mediaPolicy.liveAudioEnabled && selectedStream && selectedStream.getAudioTracks().length > 0) {
       const source = audioContext.createMediaStreamSource(selectedStream);
       source.connect(audioDestination);
       if (monitorGainRef.current) {
         source.connect(monitorGainRef.current);
       }
-      audioSourceRef.current = source;
+      liveAudioSourceRef.current = source;
       void audioContext.resume().catch(() => undefined);
     }
 
     return () => {
-      audioSourceRef.current?.disconnect();
-      audioSourceRef.current = null;
+      liveAudioSourceRef.current?.disconnect();
+      liveAudioSourceRef.current = null;
     };
-  }, [selectedStream]);
+  }, [mediaPolicy.liveAudioEnabled, selectedStream]);
+
+  useEffect(() => {
+    const audioContext = audioContextRef.current;
+    const audioDestination = audioDestinationRef.current;
+    const adVideo = adVideoRef.current;
+    if (!audioContext || !audioDestination) {
+      return;
+    }
+
+    adAudioSourceRef.current?.disconnect();
+
+    if (!mediaPolicy.adAudioEnabled || !adVideo) {
+      return;
+    }
+
+    function connectAdAudio() {
+      const currentAdVideo = adVideoRef.current;
+      const currentAudioContext = audioContextRef.current;
+      const currentAudioDestination = audioDestinationRef.current;
+      if (!currentAdVideo || !currentAudioContext || !currentAudioDestination) {
+        return;
+      }
+
+      try {
+        if (!adAudioSourceRef.current || adAudioElementRef.current !== currentAdVideo) {
+          adAudioSourceRef.current?.disconnect();
+          adAudioSourceRef.current = currentAudioContext.createMediaElementSource(currentAdVideo);
+          adAudioElementRef.current = currentAdVideo;
+        }
+
+        const source = adAudioSourceRef.current;
+        source.disconnect();
+        source.connect(currentAudioDestination);
+        if (monitorGainRef.current) {
+          source.connect(monitorGainRef.current);
+        }
+        void currentAudioContext.resume().catch(() => undefined);
+      } catch (audioError) {
+        console.warn("Could not route ad video audio into the program mix:", audioError);
+      }
+    }
+
+    void adVideo.play().then(connectAdAudio).catch(connectAdAudio);
+    adVideo.addEventListener("loadedmetadata", connectAdAudio);
+    adVideo.addEventListener("canplay", connectAdAudio);
+
+    return () => {
+      adVideo.removeEventListener("loadedmetadata", connectAdAudio);
+      adVideo.removeEventListener("canplay", connectAdAudio);
+      adAudioSourceRef.current?.disconnect();
+    };
+  }, [adVideoUrl, mediaPolicy.adAudioEnabled]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1180,9 +1294,18 @@ function ProgramMixer({
         return;
       }
 
-      const activeVideo = overlay.program_source === "ad" && adVideoUrl ? adVideoRef.current : liveVideoRef.current;
+      const activeVideo = mediaPolicy.videoSource === "ad" ? adVideoRef.current : liveVideoRef.current;
       const now = performance.now();
-      drawProgramFrame(context, canvas, activeVideo, overlay, logoImagesRef.current, now);
+      drawProgramFrame(
+        context,
+        canvas,
+        activeVideo,
+        overlay,
+        logoImagesRef.current,
+        now,
+        mediaPolicy.videoSource === "live" ? previousLiveVideoRef.current : null,
+        cameraFadeStartRef
+      );
       canvasCaptureTrackRef.current?.requestFrame?.();
     }
 
@@ -1194,7 +1317,7 @@ function ProgramMixer({
         renderTimerRef.current = null;
       }
     };
-  }, [adVideoUrl, overlay]);
+  }, [mediaPolicy.videoSource, overlay]);
 
   return (
     <section className="relative bg-[#02070c]">
@@ -1208,6 +1331,7 @@ function ProgramMixer({
         </div>
       ) : null}
       <video ref={liveVideoRef} autoPlay playsInline className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0" />
+      <video ref={previousLiveVideoRef} autoPlay muted playsInline className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0" />
       {adVideoUrl ? (
         <video
           key={adVideoUrl}
@@ -1215,7 +1339,6 @@ function ProgramMixer({
           src={adVideoUrl}
           autoPlay
           loop
-          muted
           playsInline
           crossOrigin="anonymous"
           className="pointer-events-none absolute left-0 top-0 h-px w-px opacity-0"
@@ -1267,20 +1390,44 @@ function drawProgramFrame(
   video: HTMLVideoElement | null,
   overlay: OverlayConfig,
   logos: { left: HTMLImageElement | null; right: HTMLImageElement | null },
-  now: number
+  now: number,
+  previousVideo: HTMLVideoElement | null = null,
+  cameraFadeStartRef: MutableRefObject<number | null> | null = null
 ) {
   context.fillStyle = "#02070c";
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (video && video.readyState >= 2) {
+  const fadeStart = cameraFadeStartRef?.current ?? null;
+  const fadeOpacity =
+    fadeStart === null ? 1 : getCameraCrossfadeOpacity(now - fadeStart, CAMERA_CROSSFADE_MS);
+  const shouldCrossfade =
+    fadeStart !== null &&
+    fadeOpacity < 1 &&
+    Boolean(previousVideo && previousVideo.readyState >= 2 && video && video.readyState >= 2);
+
+  if (shouldCrossfade && previousVideo && video) {
+    context.globalAlpha = 1;
+    drawVideoCover(context, canvas, previousVideo);
+    context.globalAlpha = fadeOpacity;
+    drawVideoCover(context, canvas, video);
+    context.globalAlpha = 1;
+  } else if (video && video.readyState >= 2) {
+    context.globalAlpha = 1;
     drawVideoCover(context, canvas, video);
   } else {
     drawNoSignal(context, canvas);
   }
 
+  if (cameraFadeStartRef && fadeStart !== null && fadeOpacity >= 1) {
+    cameraFadeStartRef.current = null;
+    if (previousVideo) {
+      previousVideo.srcObject = null;
+    }
+  }
+
   drawLiveBadge(context);
 
-  if (overlay.scoreboard_active === 1 && !overlay.external_scoreboard_url?.trim()) {
+  if (overlay.scoreboard_active === 1) {
     drawScoreboard(context, canvas, overlay);
   }
 
@@ -1604,8 +1751,40 @@ function GraphicsPanel({
   overlaySaving: boolean;
   room: RoomSummary;
 }) {
-  const [assetBusyField, setAssetBusyField] = useState<"left_logo_url" | "right_logo_url" | null>(null);
+  const [assetBusyField, setAssetBusyField] = useState<"left_logo_url" | "right_logo_url" | "ad_video_url" | null>(null);
   const [assetError, setAssetError] = useState<string | null>(null);
+  const [adVideoAssets, setAdVideoAssets] = useState<RoomAssetSummary[]>([]);
+
+  const refreshAdVideoAssets = useCallback(async () => {
+    try {
+      setAdVideoAssets(await getRoomAssets(room.id, "ad_video_url"));
+    } catch {
+      setAdVideoAssets([]);
+    }
+  }, [room.id]);
+
+  useEffect(() => {
+    void refreshAdVideoAssets();
+  }, [refreshAdVideoAssets]);
+
+  const scoringLink =
+    room.scoring_token && typeof window !== "undefined"
+      ? `${window.location.origin}/score/${room.scoring_token}`
+      : "";
+
+  async function handleCopyScoringLink() {
+    if (!scoringLink) {
+      setAssetError("Score control link is not ready for this room.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(scoringLink);
+      setAssetError(null);
+    } catch {
+      setAssetError("Could not copy score control link.");
+    }
+  }
 
   async function handleLogoUpload(field: "left_logo_url" | "right_logo_url", file: File) {
     setAssetBusyField(field);
@@ -1636,6 +1815,45 @@ function GraphicsPanel({
       onOverlayChange(field, "");
     } catch (deleteError: unknown) {
       setAssetError(deleteError instanceof Error ? deleteError.message : "Could not remove logo");
+    } finally {
+      setAssetBusyField(null);
+    }
+  }
+
+  async function handleAdVideoUpload(file: File) {
+    setAssetBusyField("ad_video_url");
+    setAssetError(null);
+
+    try {
+      const result = await uploadRoomAsset({
+        field: "ad_video_url",
+        file,
+        filename: file.name || "ad-video.mp4",
+        roomId: room.id,
+      });
+      onOverlayChange("ad_video_url", result.asset.publicUrl);
+      onOverlayChange("program_source", "ad");
+      await refreshAdVideoAssets();
+    } catch (uploadError: unknown) {
+      setAssetError(uploadError instanceof Error ? uploadError.message : "Could not upload ad video");
+    } finally {
+      setAssetBusyField(null);
+    }
+  }
+
+  async function handleAdVideoRemove(asset?: RoomAssetSummary) {
+    setAssetBusyField("ad_video_url");
+    setAssetError(null);
+
+    try {
+      await deleteRoomAsset(room.id, "ad_video_url", asset?.id);
+      if (!asset || overlay.ad_video_url === asset.publicUrl) {
+        onOverlayChange("ad_video_url", "");
+        onOverlayChange("program_source", "live");
+      }
+      await refreshAdVideoAssets();
+    } catch (deleteError: unknown) {
+      setAssetError(deleteError instanceof Error ? deleteError.message : "Could not remove ad video");
     } finally {
       setAssetBusyField(null);
     }
@@ -1707,6 +1925,46 @@ function GraphicsPanel({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent-lime)]">
+                Score Control Link
+              </p>
+              <p className="mt-2 text-sm text-[var(--text-muted)]">
+                Share this link with the scorer. Updates from that page are saved into the built-in broadcast scoreboard.
+              </p>
+            </div>
+            <ToggleChip
+              active={overlay.scoreboard_active === 1}
+              label={overlay.scoreboard_active === 1 ? copy.on : copy.off}
+              onClick={() => onOverlayChange("scoreboard_active", overlay.scoreboard_active === 1 ? 0 : 1)}
+            />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void handleCopyScoringLink()}
+              disabled={!scoringLink}
+              className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-main)] disabled:opacity-50"
+            >
+              <Clipboard size={14} />
+              Copy Score Link
+            </button>
+            {scoringLink ? (
+              <a
+                href={scoringLink}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-main)]"
+              >
+                <ExternalLink size={14} />
+                Open
+              </a>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-[1.25rem] border border-[var(--border-soft)] bg-black/15 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent-lime)]">
                 {copy.externalOverlay}
               </p>
               <p className="mt-2 text-sm text-[var(--text-muted)]">
@@ -1756,6 +2014,19 @@ function GraphicsPanel({
             onClick={() => onOverlayChange("program_source", "ad")}
           />
         </div>
+
+        <AdVideoUploadControl
+          busy={assetBusyField === "ad_video_url"}
+          assets={adVideoAssets}
+          copy={copy}
+          value={overlay.ad_video_url ?? ""}
+          onRemove={(asset) => void handleAdVideoRemove(asset)}
+          onTakeLive={(asset) => {
+            onOverlayChange("ad_video_url", asset.publicUrl);
+            onOverlayChange("program_source", "ad");
+          }}
+          onUpload={(file) => void handleAdVideoUpload(file)}
+        />
       </div>
 
       {overlayNotice ? <NoticeBox message={overlayNotice} className="mt-4" /> : null}
@@ -1837,6 +2108,112 @@ function LogoUploadControl({
           {copy.remove}
         </button>
       </div>
+    </div>
+  );
+}
+
+function AdVideoUploadControl({
+  assets,
+  busy,
+  copy,
+  onRemove,
+  onTakeLive,
+  onUpload,
+  value,
+}: {
+  assets: RoomAssetSummary[];
+  busy: boolean;
+  copy: (typeof studioCopy)[StudioLanguage];
+  onRemove: (asset?: RoomAssetSummary) => void;
+  onTakeLive: (asset: RoomAssetSummary) => void;
+  onUpload: (file: File) => void;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[1.25rem] border border-[var(--border-soft)] bg-black/15 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent-lime)]">
+            {copy.adVideoUpload}
+          </p>
+          <p className="mt-2 break-all text-sm text-[var(--text-muted)]">
+            {assets.length}/3 {copy.adVideoSlots}
+          </p>
+        </div>
+        {value ? (
+          <Video className="shrink-0 text-[var(--accent-cyan)]" size={22} />
+        ) : null}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold text-[var(--text-main)]">
+          {busy ? <Loader2 className="animate-spin" size={14} /> : <Upload size={14} />}
+          {copy.chooseFile}
+          <input
+            type="file"
+            accept="video/*"
+            disabled={busy}
+            className="sr-only"
+            onChange={(event) => {
+              const [file] = event.target.files ?? [];
+              event.target.value = "";
+              if (file) {
+                onUpload(file);
+              }
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => onRemove(assets.find((asset) => asset.publicUrl === value))}
+          disabled={busy || !value}
+          className="inline-flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold text-[var(--text-main)] disabled:opacity-50"
+        >
+          <Trash2 size={14} />
+          {copy.remove}
+        </button>
+      </div>
+
+      {assets.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          {assets.map((asset, index) => (
+            <div
+              key={asset.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[var(--border-soft)] bg-black/15 px-3 py-3"
+            >
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-main)]">
+                  Ad {index + 1}
+                </p>
+                <p className="mt-1 max-w-48 truncate text-xs text-[var(--text-muted)]">
+                  {asset.publicUrl}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => onTakeLive(asset)}
+                  className={`rounded-full px-3 py-2 text-xs font-semibold ${
+                    value === asset.publicUrl
+                      ? "bg-[var(--accent-cyan)] text-[#041016]"
+                      : "border border-[var(--border-soft)] text-[var(--text-main)]"
+                  }`}
+                >
+                  {value === asset.publicUrl ? copy.onAir : copy.takeAdLive}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRemove(asset)}
+                  disabled={busy}
+                  className="rounded-full border border-[var(--border-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)] disabled:opacity-50"
+                >
+                  {copy.remove}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

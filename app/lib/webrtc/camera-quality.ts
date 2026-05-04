@@ -24,3 +24,7 @@ export function getQualityConstraints(quality: CameraQuality, isLandscape: boole
     resizeMode: "crop-and-scale",
   };
 }
+
+export function getCameraPublishConstraints(): CameraVideoConstraintConfig {
+  return getQualityConstraints("hd", true);
+}

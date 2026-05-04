@@ -32,4 +32,12 @@ describe("multitenancy package catalog", () => {
     expect(formatPackagePrice({ amountCents: 2499, currency: "usd" })).toBe("$24.99");
     expect(formatPackagePrice({ amountCents: 150000, currency: "bdt" })).toBe("৳1,500");
   });
+
+  it("limits uploaded ad videos by package tier", () => {
+    expect(DEFAULT_PACKAGES.map((item) => [item.id, item.max_ad_videos])).toEqual([
+      ["starter-live", 1],
+      ["matchday-pro", 2],
+      ["season-ops", 3],
+    ]);
+  });
 });

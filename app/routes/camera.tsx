@@ -20,11 +20,10 @@ import {
   removeRoomCamera,
 } from "~/lib/sfu-room";
 import { verifyRoomPin, type RoomSummary } from "~/lib/realtime";
-import { getQualityConstraints } from "~/lib/webrtc/camera-quality";
+import { getCameraPublishConstraints } from "~/lib/webrtc/camera-quality";
 
 type CameraSession = {
   cameraId: string;
-  captureLandscape: boolean;
   client: CloudflareSFUClient;
   room: RoomSummary;
   stream: MediaStream;
@@ -38,7 +37,6 @@ export default function CameraPublisher() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>("Standby");
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [captureLandscape, setCaptureLandscape] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -118,6 +116,32 @@ export default function CameraPublisher() {
     };
   }, [session]);
 
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    const [videoTrack] = session.stream.getVideoTracks();
+    if (!videoTrack) {
+      return;
+    }
+
+    function applyLandscapeConstraints() {
+      void videoTrack.applyConstraints(getCameraPublishConstraints()).catch(() => {
+        setNotice("Landscape mode retrying");
+      });
+    }
+
+    applyLandscapeConstraints();
+    window.addEventListener("orientationchange", applyLandscapeConstraints);
+    window.addEventListener("resize", applyLandscapeConstraints);
+
+    return () => {
+      window.removeEventListener("orientationchange", applyLandscapeConstraints);
+      window.removeEventListener("resize", applyLandscapeConstraints);
+    };
+  }, [session]);
+
   async function handleJoin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
@@ -136,7 +160,7 @@ export default function CameraPublisher() {
           noiseSuppression: true,
         },
         video: {
-          ...getQualityConstraints("hd", captureLandscape),
+          ...getCameraPublishConstraints(),
           facingMode: { ideal: "environment" },
         },
       });
@@ -167,7 +191,7 @@ export default function CameraPublisher() {
         videoTrackName: trackNames.videoTrackName,
       });
 
-      setSession({ cameraId, captureLandscape, client, room, stream });
+      setSession({ cameraId, client, room, stream });
       setAudioEnabled(audioTrack ? audioTrack.enabled : false);
       setVideoEnabled(videoTrack.enabled);
       setNotice("Sending Signal");
@@ -254,31 +278,6 @@ export default function CameraPublisher() {
               value={operatorName}
               onChange={setOperatorName}
             />
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setCaptureLandscape(true)}
-                className={`rounded-full px-4 py-3 text-sm font-semibold ${
-                  captureLandscape
-                    ? "bg-[var(--accent-cyan)] text-[#041016]"
-                    : "border border-[var(--border-soft)] text-[var(--text-main)]"
-                }`}
-              >
-                Landscape
-              </button>
-              <button
-                type="button"
-                onClick={() => setCaptureLandscape(false)}
-                className={`rounded-full px-4 py-3 text-sm font-semibold ${
-                  !captureLandscape
-                    ? "bg-[var(--accent-cyan)] text-[#041016]"
-                    : "border border-[var(--border-soft)] text-[var(--text-main)]"
-                }`}
-              >
-                Portrait
-              </button>
-            </div>
-
             {error ? <ErrorBox message={error} /> : null}
 
             <button
@@ -336,7 +335,7 @@ export default function CameraPublisher() {
             />
           </div>
 
-          <div className={`relative w-full overflow-hidden bg-[#02070c] ${session.captureLandscape ? "aspect-video" : "aspect-[9/16]"}`}>
+          <div className="relative aspect-video w-full overflow-hidden bg-[#02070c]">
             <video
               ref={videoRef}
               autoPlay

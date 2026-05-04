@@ -78,6 +78,7 @@ export type StreamingPackage = {
   duration_minutes: number;
   features: string[];
   id: string;
+  max_ad_videos: number;
   max_cameras: number;
   max_rooms: number;
   name: string;
@@ -92,6 +93,7 @@ export type AdminPackageUpdate = Partial<
     | "description"
     | "duration_minutes"
     | "features"
+    | "max_ad_videos"
     | "max_cameras"
     | "max_rooms"
     | "name"
@@ -155,12 +157,16 @@ export type AdminLoginResult = {
 
 export type RoomAssetResult = {
   asset: {
-    field: "left_logo_url" | "right_logo_url";
+    field: "left_logo_url" | "right_logo_url" | "ad_video_url";
     id: string;
     publicUrl: string;
     r2Key: string;
     sizeBytes: number;
   };
+};
+
+export type RoomAssetSummary = RoomAssetResult["asset"] & {
+  contentType: string;
 };
 
 export type RelayConfig = {
@@ -213,6 +219,20 @@ export async function verifyRoomPin(pin: string): Promise<RoomSummary> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pin }),
+  });
+
+  const payload = await readApi<{ room: RoomSummary }>(response);
+  return payload.room;
+}
+
+export async function verifyDirectorAccess(input: {
+  accessToken: string;
+  pin: string;
+}): Promise<RoomSummary> {
+  const response = await fetch("/api/v1/director-access", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
   });
 
   const payload = await readApi<{ room: RoomSummary }>(response);
@@ -381,17 +401,18 @@ export async function confirmRoomPass(sessionId: string): Promise<{ room: RoomSu
   return readApi<{ room: RoomSummary }>(response);
 }
 
-export async function startRoomSession(roomId: string): Promise<RoomSummary> {
+export async function startRoomSession(roomId: string, accessToken: string): Promise<RoomSummary> {
   const response = await fetch(`/api/v1/rooms/${roomId}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken }),
   });
   const payload = await readApi<{ room: RoomSummary }>(response);
   return payload.room;
 }
 
 export async function uploadRoomAsset(input: {
-  field: "left_logo_url" | "right_logo_url";
+  field: "left_logo_url" | "right_logo_url" | "ad_video_url";
   file: Blob;
   filename: string;
   roomId: string;
@@ -408,12 +429,26 @@ export async function uploadRoomAsset(input: {
   return readApi<RoomAssetResult>(response);
 }
 
+export async function getRoomAssets(
+  roomId: string,
+  field: "left_logo_url" | "right_logo_url" | "ad_video_url"
+): Promise<RoomAssetSummary[]> {
+  const response = await fetch(`/api/v1/rooms/${roomId}/assets?field=${encodeURIComponent(field)}`);
+  const payload = await readApi<{ assets: RoomAssetSummary[] }>(response);
+  return payload.assets;
+}
+
 export async function deleteRoomAsset(
   roomId: string,
-  field: "left_logo_url" | "right_logo_url"
+  field: "left_logo_url" | "right_logo_url" | "ad_video_url",
+  assetId?: string
 ): Promise<{ deleted: boolean; field: string }> {
+  const query = new URLSearchParams({ field });
+  if (assetId) {
+    query.set("assetId", assetId);
+  }
   const response = await fetch(
-    `/api/v1/rooms/${roomId}/assets?field=${encodeURIComponent(field)}`,
+    `/api/v1/rooms/${roomId}/assets?${query.toString()}`,
     { method: "DELETE" }
   );
 

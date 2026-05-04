@@ -52,8 +52,9 @@ const RELAY_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 const ADMIN_SESSION_COOKIE = "live_studio_admin_session";
 const ADMIN_SESSION_TTL_SECONDS = 8 * 60 * 60;
 const GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-const ALLOWED_ASSET_FIELDS = ["left_logo_url", "right_logo_url"] as const;
+const ALLOWED_ASSET_FIELDS = ["left_logo_url", "right_logo_url", "ad_video_url"] as const;
 const MAX_LOGO_UPLOAD_BYTES = 1_200_000;
+const MAX_AD_VIDEO_UPLOAD_BYTES = 250_000_000;
 
 type ApiSuccess<T extends Record<string, unknown>> = {
   success: true;
@@ -171,12 +172,14 @@ type PackageRow = Omit<PackageRecord, "features"> & {
 };
 
 type RoomAssetRecord = {
+  content_type: string;
   deleted_at?: string | null;
   id: string;
   overlay_field: AssetOverlayField;
   public_url: string;
   r2_key: string;
   room_id: string;
+  size_bytes: number;
   tenant_id?: string | null;
 };
 
@@ -229,6 +232,7 @@ type PackagePatchBody = Partial<
     | "active"
     | "description"
     | "duration_minutes"
+    | "max_ad_videos"
     | "max_cameras"
     | "max_rooms"
     | "name"
@@ -344,6 +348,32 @@ function toRoomSummary(room: RoomRecord): RoomSummaryRecord {
   return summary;
 }
 
+function toCameraJoinRoomSummary(room: RoomRecord): RoomSummaryRecord {
+  const { scoring_token: _scoringToken, ...summary } = toRoomSummary(room);
+  return summary;
+}
+
+async function assertDirectorRoomAccess(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string,
+  accessToken: string
+): Promise<{ room: RoomRecord; tenant: TenantRecord }> {
+  const tenant = await getTenantByAccessToken(c, accessToken);
+  const room = await c.env.DB.prepare("SELECT * FROM rooms WHERE id = ?")
+    .bind(roomId)
+    .first<RoomRecord>();
+
+  if (!room) {
+    throw new HTTPException(404, { message: "Room not found" });
+  }
+
+  if (room.tenant_id !== tenant.id) {
+    throw new HTTPException(403, { message: "This director account does not own this room" });
+  }
+
+  return { room, tenant };
+}
+
 function getStripeSecretKey(c: Context<{ Bindings: Bindings }>): string {
   const secretKey = c.env.STRIPE_SECRET_KEY;
   if (!secretKey) {
@@ -378,6 +408,7 @@ function normalizePackageRow(row: PackageRow): PackageRecord {
     duration_minutes: row.duration_minutes,
     features,
     id: row.id,
+    max_ad_videos: row.max_ad_videos ?? 1,
     max_cameras: row.max_cameras,
     max_rooms: row.max_rooms,
     name: row.name,
@@ -730,6 +761,16 @@ async function getRoomCameraLimit(
   return selectedPackage.max_cameras;
 }
 
+async function getRoomSelectedPackage(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string
+): Promise<PackageRecord> {
+  const roomPass = await c.env.DB.prepare(
+    "SELECT * FROM room_passes WHERE room_id = ? ORDER BY paid_at DESC, created_at DESC LIMIT 1"
+  ).bind(roomId).first<RoomPassRecord>();
+  return getSelectedPackage(c, roomPass?.package_id);
+}
+
 async function assertRoomCameraCapacity(
   c: Context<{ Bindings: Bindings }>,
   roomId: string,
@@ -773,6 +814,7 @@ async function expireRoomAccessNow(
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`
   ).bind(expiresAt, roomId).run();
+  await clearRoomAssetsForRoom(c, roomId);
 
   return {
     ...room,
@@ -1013,10 +1055,48 @@ function getR2AssetsBucket(c: Context<{ Bindings: Bindings }>): R2Bucket {
 function assertAssetOverlayField(value: FormDataEntryValue | string | null): AssetOverlayField {
   const field = typeof value === "string" ? value : "";
   if (!ALLOWED_ASSET_FIELDS.includes(field as AssetOverlayField)) {
-    throw new HTTPException(400, { message: "Logo field must be left_logo_url or right_logo_url" });
+    throw new HTTPException(400, { message: "Asset field must be left_logo_url, right_logo_url, or ad_video_url" });
   }
 
   return field as AssetOverlayField;
+}
+
+function getRoomAssetExtension(field: AssetOverlayField, contentType: string): string {
+  if (field === "ad_video_url") {
+    if (contentType === "video/webm") {
+      return "webm";
+    }
+
+    if (contentType === "video/quicktime") {
+      return "mov";
+    }
+
+    return "mp4";
+  }
+
+  return contentType === "image/png" ? "png" : contentType === "image/jpeg" ? "jpg" : "webp";
+}
+
+function assertRoomAssetFile(field: AssetOverlayField, file: File): void {
+  if (field === "ad_video_url") {
+    if (!file.type.startsWith("video/")) {
+      throw new HTTPException(400, { message: "Ad video upload must be a video file" });
+    }
+
+    if (file.size <= 0 || file.size > MAX_AD_VIDEO_UPLOAD_BYTES) {
+      throw new HTTPException(400, { message: "Ad video must be smaller than 250 MB" });
+    }
+
+    return;
+  }
+
+  if (!file.type.startsWith("image/")) {
+    throw new HTTPException(400, { message: "Logo upload must be an image" });
+  }
+
+  if (file.size <= 0 || file.size > MAX_LOGO_UPLOAD_BYTES) {
+    throw new HTTPException(400, { message: "Logo image must be smaller than 1.2 MB after compression" });
+  }
 }
 
 function buildAssetPublicUrl(c: Context<{ Bindings: Bindings }>, key: string): string {
@@ -1045,6 +1125,54 @@ async function getCurrentRoomAsset(
   }
 }
 
+async function getRoomAssetById(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string,
+  field: AssetOverlayField,
+  assetId: string
+): Promise<RoomAssetRecord | null> {
+  try {
+    return await c.env.DB.prepare(
+      `SELECT * FROM room_assets
+        WHERE id = ? AND room_id = ? AND overlay_field = ? AND deleted_at IS NULL
+        LIMIT 1`
+    ).bind(assetId, roomId, field).first<RoomAssetRecord>();
+  } catch {
+    return null;
+  }
+}
+
+async function getActiveRoomAssets(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string,
+  field?: AssetOverlayField
+): Promise<RoomAssetRecord[]> {
+  try {
+    const { results } = await c.env.DB.prepare(
+      `SELECT * FROM room_assets
+        WHERE room_id = ? AND deleted_at IS NULL
+        ORDER BY created_at ASC`
+    ).bind(roomId).all<RoomAssetRecord>();
+    const assets = results ?? [];
+    return field ? assets.filter((asset) => asset.overlay_field === field) : assets;
+  } catch {
+    return [];
+  }
+}
+
+async function assertRoomAdVideoCapacity(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string
+): Promise<void> {
+  const selectedPackage = await getRoomSelectedPackage(c, roomId);
+  const adVideoAssets = await getActiveRoomAssets(c, roomId, "ad_video_url");
+  if (adVideoAssets.length >= selectedPackage.max_ad_videos) {
+    throw new HTTPException(403, {
+      message: `${selectedPackage.name} allows up to ${selectedPackage.max_ad_videos} ad video${selectedPackage.max_ad_videos === 1 ? "" : "s"} for this room`,
+    });
+  }
+}
+
 async function clearRoomAsset(
   c: Context<{ Bindings: Bindings }>,
   asset: RoomAssetRecord | null
@@ -1060,6 +1188,15 @@ async function clearRoomAsset(
     ).bind(asset.id).run();
   } catch {
     // Older local databases may not have the room_assets table yet. R2 deletion is the source of truth.
+  }
+}
+
+async function clearRoomAssetsForRoom(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string
+): Promise<void> {
+  for (const asset of await getActiveRoomAssets(c, roomId)) {
+    await clearRoomAsset(c, asset);
   }
 }
 
@@ -1382,7 +1519,7 @@ app.post("/rooms/verify", async (c) => {
       .bind(room.scoring_token, room.id)
       .run();
   }
-  return jsonSuccess(c, { room: toRoomSummary(room) });
+  return jsonSuccess(c, { room: toCameraJoinRoomSummary(room) });
 });
 
 // ═══════════════════════════════════════
@@ -1506,6 +1643,45 @@ app.get("/v1/accounts/me", async (c) => {
   });
 });
 
+app.post("/v1/director-access", async (c) => {
+  const body = await c.req
+    .json<{ accessToken?: string; pin?: string }>()
+    .catch((): { accessToken?: string; pin?: string } => ({}));
+  const pin = body.pin?.trim() ?? "";
+  const accessToken = body.accessToken?.trim() ?? "";
+
+  if (!pin) {
+    throw new HTTPException(400, { message: "Room PIN is required" });
+  }
+
+  if (!accessToken) {
+    throw new HTTPException(401, { message: "Director account access is required" });
+  }
+
+  const room = await c.env.DB.prepare("SELECT * FROM rooms WHERE pin = ?")
+    .bind(pin)
+    .first<RoomRecord>();
+
+  if (!room) {
+    throw new HTTPException(404, { message: "Invalid PIN or Room not found" });
+  }
+
+  if (!isRoomVerifiable(room)) {
+    throw new HTTPException(403, { message: getRoomUnavailableMessage(room) });
+  }
+
+  await assertDirectorRoomAccess(c, room.id, accessToken);
+
+  if (!room.scoring_token) {
+    room.scoring_token = crypto.randomUUID().replaceAll("-", "");
+    await c.env.DB.prepare("UPDATE rooms SET scoring_token = ? WHERE id = ?")
+      .bind(room.scoring_token, room.id)
+      .run();
+  }
+
+  return jsonSuccess(c, { room: toRoomSummary(room) });
+});
+
 app.get("/v1/admin/summary", async (c) => {
   assertAdminRequest(c);
 
@@ -1568,6 +1744,10 @@ app.patch("/v1/admin/packages/:id", async (c) => {
       Number.isInteger(body.max_cameras) && Number(body.max_cameras) > 0
         ? Number(body.max_cameras)
         : currentPackage.max_cameras,
+    max_ad_videos:
+      Number.isInteger(body.max_ad_videos) && Number(body.max_ad_videos) > 0
+        ? Number(body.max_ad_videos)
+        : currentPackage.max_ad_videos,
     max_rooms:
       Number.isInteger(body.max_rooms) && Number(body.max_rooms) > 0
         ? Number(body.max_rooms)
@@ -1593,11 +1773,12 @@ app.patch("/v1/admin/packages/:id", async (c) => {
       duration_minutes,
       max_rooms,
       max_cameras,
+      max_ad_videos,
       active,
       sort_order,
       features_json,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       description = excluded.description,
@@ -1606,6 +1787,7 @@ app.patch("/v1/admin/packages/:id", async (c) => {
       duration_minutes = excluded.duration_minutes,
       max_rooms = excluded.max_rooms,
       max_cameras = excluded.max_cameras,
+      max_ad_videos = excluded.max_ad_videos,
       active = excluded.active,
       sort_order = excluded.sort_order,
       features_json = excluded.features_json,
@@ -1619,6 +1801,7 @@ app.patch("/v1/admin/packages/:id", async (c) => {
     nextPackage.duration_minutes,
     nextPackage.max_rooms,
     nextPackage.max_cameras,
+    nextPackage.max_ad_videos,
     nextPackage.active,
     nextPackage.sort_order,
     JSON.stringify(nextPackage.features)
@@ -1629,6 +1812,7 @@ app.patch("/v1/admin/packages/:id", async (c) => {
     metadata: {
       active: nextPackage.active,
       max_cameras: nextPackage.max_cameras,
+      max_ad_videos: nextPackage.max_ad_videos,
       max_rooms: nextPackage.max_rooms,
       price_cents: nextPackage.price_cents,
       sort_order: nextPackage.sort_order,
@@ -1840,6 +2024,10 @@ app.post("/v1/manual-room-passes/:id/approve", async (c) => {
 });
 
 app.post("/v1/rooms/:id/start", async (c) => {
+  const body = await c.req
+    .json<{ accessToken?: string }>()
+    .catch((): { accessToken?: string } => ({}));
+  await assertDirectorRoomAccess(c, c.req.param("id"), body.accessToken?.trim() ?? "");
   const room = await startRoomSession(c, c.req.param("id"));
   return jsonSuccess(c, { room: toRoomSummary(room) });
 });
@@ -2267,26 +2455,22 @@ app.post("/v1/rooms/:id/assets", async (c) => {
   const file = formData.get("file");
 
   if (!(file instanceof File)) {
-    throw new HTTPException(400, { message: "A compressed logo file is required" });
+    throw new HTTPException(400, { message: "An asset file is required" });
   }
 
-  if (!file.type.startsWith("image/")) {
-    throw new HTTPException(400, { message: "Logo upload must be an image" });
+  assertRoomAssetFile(field, file);
+  if (field === "ad_video_url") {
+    await assertRoomAdVideoCapacity(c, roomId);
   }
-
-  if (file.size <= 0 || file.size > MAX_LOGO_UPLOAD_BYTES) {
-    throw new HTTPException(400, { message: "Logo image must be smaller than 1.2 MB after compression" });
-  }
-
   const assetId = createPublicId("asset");
-  const extension = file.type === "image/png" ? "png" : file.type === "image/jpeg" ? "jpg" : "webp";
+  const extension = getRoomAssetExtension(field, file.type);
   const r2Key = `rooms/${roomId}/${field}/${assetId}.${extension}`;
   const publicUrl = buildAssetPublicUrl(c, r2Key);
-  const currentAsset = await getCurrentRoomAsset(c, roomId, field);
+  const currentAsset = field === "ad_video_url" ? null : await getCurrentRoomAsset(c, roomId, field);
 
   await getR2AssetsBucket(c).put(r2Key, await file.arrayBuffer(), {
     httpMetadata: {
-      contentType: file.type || "image/webp",
+      contentType: file.type || (field === "ad_video_url" ? "video/mp4" : "image/webp"),
     },
     customMetadata: {
       field,
@@ -2315,7 +2499,7 @@ app.post("/v1/rooms/:id/assets", async (c) => {
     field,
     r2Key,
     publicUrl,
-    file.type || "image/webp",
+    file.type || (field === "ad_video_url" ? "video/mp4" : "image/webp"),
     file.size
   ).run();
   await c.env.DB.prepare(
@@ -2324,6 +2508,7 @@ app.post("/v1/rooms/:id/assets", async (c) => {
 
   return jsonSuccess(c, {
     asset: {
+      contentType: file.type || (field === "ad_video_url" ? "video/mp4" : "image/webp"),
       field,
       id: assetId,
       publicUrl,
@@ -2333,17 +2518,40 @@ app.post("/v1/rooms/:id/assets", async (c) => {
   });
 });
 
+app.get("/v1/rooms/:id/assets", async (c) => {
+  const roomId = c.req.param("id");
+  await getRoomById(c, roomId);
+  const field = assertAssetOverlayField(c.req.query("field") ?? null);
+  const assets = await getActiveRoomAssets(c, roomId, field);
+
+  return jsonSuccess(c, {
+    assets: assets.map((asset) => ({
+      contentType: asset.content_type,
+      field: asset.overlay_field,
+      id: asset.id,
+      publicUrl: asset.public_url,
+      r2Key: asset.r2_key,
+      sizeBytes: asset.size_bytes,
+    })),
+  });
+});
+
 app.delete("/v1/rooms/:id/assets", async (c) => {
   const roomId = c.req.param("id");
   await getRoomById(c, roomId);
   const field = assertAssetOverlayField(c.req.query("field") ?? null);
-  const currentAsset = await getCurrentRoomAsset(c, roomId, field);
+  const assetId = c.req.query("assetId")?.trim() ?? "";
+  const currentAsset = assetId
+    ? await getRoomAssetById(c, roomId, field, assetId)
+    : await getCurrentRoomAsset(c, roomId, field);
 
   await clearRoomAsset(c, currentAsset);
   await ensureOverlayRow(c, roomId);
-  await c.env.DB.prepare(
-    `UPDATE overlays SET ${field} = NULL, updated_at = CURRENT_TIMESTAMP WHERE room_id = ?`
-  ).bind(roomId).run();
+  if (field !== "ad_video_url" || currentAsset?.public_url) {
+    await c.env.DB.prepare(
+      `UPDATE overlays SET ${field} = NULL, updated_at = CURRENT_TIMESTAMP WHERE room_id = ? AND ${field} = ?`
+    ).bind(roomId, currentAsset?.public_url ?? "").run();
+  }
 
   return jsonSuccess(c, { deleted: Boolean(currentAsset), field });
 });
@@ -2434,7 +2642,7 @@ app.post("/scoring/:token", async (c) => {
     body: JSON.stringify(payload),
   });
 
-  await app.fetch(proxyRequest, c.env, c.executionCtx);
+  await app.fetch(proxyRequest, c.env);
   return jsonSuccess(c, { updated: true });
 });
 

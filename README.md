@@ -4,8 +4,8 @@ Multi-camera live streaming studio for field sports:
 
 - Paid 3-hour room passes create isolated room PINs for each match
 - Mobile phones join as cameras with a room PIN
-- Director panel pulls remote Cloudflare Realtime SFU feeds and switches the live program output
-- External scoring links can be shown as website/player overlays
+- Director panel requires the tenant account token plus room PIN, then pulls remote Cloudflare Realtime SFU feeds and switches the live program output
+- Built-in cricket, football, and generic score controls can be shared through a room scoring link; the final RTMP canvas always includes the saved scoreboard/graphics
 - Broadcast goes through a local or VPS WebSocket relay driven by `ffmpeg`, then out to YouTube or Facebook RTMP.
 
 ## Local Development
@@ -114,6 +114,7 @@ npx wrangler secret put MANUAL_PAYMENT_ADMIN_TOKEN
 ```
 
 Package camera limits are enforced when cameras register with a room, and admin package/payment/room actions are written to `admin_audit_logs` after migration `0012_admin_audit_logs.sql`.
+Package ad-video limits are enforced on R2 ad uploads after migration `0013_package_ad_video_limits.sql`: Starter Live allows 1 ad video, Matchday Pro allows 2, and Season Ops allows 3.
 
 Stripe webhook endpoint:
 
@@ -141,11 +142,13 @@ Relay diagnostics are available on the VPS at `http://127.0.0.1:8899/status`.
 Then in the director panel:
 
 1. Open `/studio`
-2. Join the room with the PIN
+2. Sign in on the home page first, then join the room with the PIN
 3. Open `/camera` on one or more phones and join with the same PIN
 4. Switch a ready camera to live, update graphics, or switch to ad mode
 5. Paste the YouTube or Facebook RTMP URL and stream key
 6. Press `GO LIVE`
+
+Use the score control link from the studio graphics panel when another operator needs to manage the scoreboard. That page updates the room overlay data directly, and the director studio polls those updates into the mixed canvas.
 
 The relay URL and relay token are managed by the Worker and are not shown in the director dashboard. The browser receives a short-lived room-scoped relay URL when streaming starts.
 

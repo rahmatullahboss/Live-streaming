@@ -11,6 +11,7 @@ type MockRoomRecord = {
   id: string;
   name: string;
   pin: string;
+  scoring_token?: string | null;
   status?: string | null;
   tenant_id?: string | null;
   youtube_output_url?: string | null;
@@ -18,11 +19,18 @@ type MockRoomRecord = {
 };
 
 type MockOverlayRecord = {
+  ad_video_url?: string | null;
   external_scoreboard_url?: string | null;
   left_logo_url?: string | null;
   room_id: string;
   right_logo_url?: string | null;
   scoreboard_active?: number | null;
+  scoring_data?: string | null;
+  sport?: string | null;
+  team1_name?: string | null;
+  team1_score?: number | null;
+  team2_name?: string | null;
+  team2_score?: number | null;
 };
 
 type MockTenantRecord = {
@@ -55,6 +63,7 @@ type MockPackageRecord = {
   duration_minutes: number;
   features: string[];
   id: string;
+  max_ad_videos?: number;
   max_cameras: number;
   max_rooms: number;
   name: string;
@@ -63,12 +72,14 @@ type MockPackageRecord = {
 };
 
 type MockAssetRecord = {
+  content_type?: string;
   deleted_at?: string | null;
   id: string;
   overlay_field: string;
   public_url: string;
   r2_key: string;
   room_id: string;
+  size_bytes?: number;
   tenant_id?: string | null;
 };
 
@@ -147,6 +158,14 @@ function createMockDb(
         return { results: Array.from(roomPasses.values()) };
       }
 
+      if (this.sql.includes("SELECT * FROM room_assets") && this.sql.includes("room_id = ?")) {
+        return {
+          results: Array.from(assets.values()).filter(
+            (asset) => asset.room_id === String(this.values[0]) && !asset.deleted_at
+          ),
+        };
+      }
+
       if (this.sql.includes("SELECT * FROM packages")) {
         return {
           results: Array.from(packages.values()).map((item) => ({
@@ -197,6 +216,18 @@ function createMockDb(
         return rooms.get(String(this.values[0])) ?? null;
       }
 
+      if (this.sql.includes("SELECT * FROM rooms WHERE pin = ?")) {
+        return Array.from(rooms.values()).find(
+          (room) => room.pin === String(this.values[0])
+        ) ?? null;
+      }
+
+      if (this.sql.includes("SELECT * FROM rooms WHERE scoring_token = ?")) {
+        return Array.from(rooms.values()).find(
+          (room) => room.scoring_token === String(this.values[0])
+        ) ?? null;
+      }
+
       if (this.sql.includes("SELECT * FROM rooms WHERE checkout_session_id = ?")) {
         return Array.from(rooms.values()).find(
           (room) => room.checkout_session_id === String(this.values[0])
@@ -211,6 +242,16 @@ function createMockDb(
 
       if (this.sql.includes("SELECT * FROM room_passes WHERE id = ?")) {
         return roomPasses.get(String(this.values[0])) ?? null;
+      }
+
+      if (this.sql.includes("SELECT * FROM room_assets") && this.sql.includes("WHERE id = ?")) {
+        return Array.from(assets.values()).find(
+          (asset) =>
+            asset.id === String(this.values[0]) &&
+            asset.room_id === String(this.values[1]) &&
+            asset.overlay_field === String(this.values[2]) &&
+            !asset.deleted_at
+        ) ?? null;
       }
 
       if (this.sql.includes("SELECT * FROM room_passes WHERE room_id = ?")) {
@@ -372,23 +413,37 @@ function createMockDb(
       if (this.sql.includes("UPDATE overlays SET") && this.sql.includes("WHERE room_id = ?")) {
         const roomId = String(this.values.at(-1));
         const overlay = overlays.get(roomId) ?? { room_id: roomId };
-        if (this.sql.includes("left_logo_url")) {
-          overlay.left_logo_url = this.values[0] ? String(this.values[0]) : null;
-        }
-        if (this.sql.includes("right_logo_url")) {
-          overlay.right_logo_url = this.values[0] ? String(this.values[0]) : null;
-        }
+        const assignmentText = this.sql.slice(
+          this.sql.indexOf("UPDATE overlays SET") + "UPDATE overlays SET".length,
+          this.sql.indexOf("WHERE room_id = ?")
+        );
+        const fields = assignmentText
+          .split(",")
+          .map((assignment) => assignment.trim().split(" = ")[0])
+          .filter((field) => field && field !== "updated_at");
+
+        fields.forEach((field, index) => {
+          const value = this.values[index];
+          const normalizedValue = value === undefined || value === null || value === "" ? null : value;
+          if (field === "scoring_data") {
+            overlay.scoring_data = normalizedValue ? String(normalizedValue) : null;
+          } else {
+            (overlay as Record<string, unknown>)[field] = normalizedValue;
+          }
+        });
         overlays.set(roomId, overlay);
       }
 
       if (this.sql.includes("INSERT INTO room_assets")) {
         const [id, tenantId, roomId, overlayField, r2Key, publicUrl] = this.values;
         assets.set(String(id), {
+          content_type: this.values[6] ? String(this.values[6]) : "application/octet-stream",
           id: String(id),
           overlay_field: String(overlayField),
           public_url: String(publicUrl),
           r2_key: String(r2Key),
           room_id: String(roomId),
+          size_bytes: Number(this.values[7] ?? 0),
           tenant_id: tenantId ? String(tenantId) : null,
         });
       }
@@ -429,6 +484,7 @@ function createMockDb(
           durationMinutes,
           maxRooms,
           maxCameras,
+          maxAdVideos,
           active,
           sortOrder,
           featuresJson,
@@ -440,6 +496,7 @@ function createMockDb(
           duration_minutes: Number(durationMinutes),
           features: JSON.parse(String(featuresJson)) as string[],
           id: String(id),
+          max_ad_videos: Number(maxAdVideos),
           max_cameras: Number(maxCameras),
           max_rooms: Number(maxRooms),
           name: String(name),
@@ -925,6 +982,74 @@ describe("api /rooms/:id/overlays", () => {
       scoreboard_active: 0,
     });
   });
+
+  it("updates built-in scoring fields from the scorer link", async () => {
+    const bindings = createBindings(
+      {},
+      [
+        {
+          id: "demo-room-01",
+          name: "Demo Studio",
+          pin: "123456",
+          scoring_token: "score_token_01",
+        },
+      ],
+      [
+        {
+          room_id: "demo-room-01",
+          scoreboard_active: 0,
+          team1_name: "TEAM A",
+          team1_score: 0,
+          team2_name: "TEAM B",
+          team2_score: 0,
+        },
+      ]
+    );
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/scoring/score_token_01", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          match_status: "LIVE",
+          scoreboard_active: 1,
+          scoring_data: {
+            balls: 17,
+            current_rate: "8.47",
+            overs: "2.5",
+            runs: 24,
+            wickets: 2,
+          },
+          sport: "cricket",
+          team1_name: "DHAKA",
+          team1_score: 24,
+          team2_name: "CHITTAGONG",
+          team2_score: 2,
+        }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+
+    const overlayResponse = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      bindings
+    );
+    await expect(overlayResponse.json()).resolves.toMatchObject({
+      scoreboard_active: 1,
+      scoring_data: {
+        overs: "2.5",
+        runs: 24,
+        wickets: 2,
+      },
+      sport: "cricket",
+      team1_name: "DHAKA",
+      team1_score: 24,
+      team2_name: "CHITTAGONG",
+      team2_score: 2,
+    });
+  });
 });
 
 describe("api /api/v1/room-passes", () => {
@@ -1031,6 +1156,7 @@ describe("api /api/v1/room-passes", () => {
       new Request("https://example.com/api/v1/rooms/room_ready_01/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "acct_token_01" }),
       }),
       createBindings(
         {},
@@ -1055,6 +1181,13 @@ describe("api /api/v1/room-passes", () => {
             status: "paid",
             tenant_id: "tenant_01",
           },
+        ],
+        [
+          {
+            access_token: "acct_token_01",
+            email: "club@example.com",
+            id: "tenant_01",
+          },
         ]
       )
     );
@@ -1063,6 +1196,79 @@ describe("api /api/v1/room-passes", () => {
     const payload = await response.json() as { room: MockRoomRecord };
     expect(payload.room.status).toBe("active");
     expect(payload.room.expires_at).toEqual(expect.any(String));
+  });
+
+  it("rejects director room start without the owner access token", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_ready_01/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "acct_token_wrong" }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_ready_01",
+            name: "Ready Match Room",
+            pin: "112233",
+            status: "ready",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [],
+        [
+          {
+            access_token: "acct_token_01",
+            email: "club@example.com",
+            id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("allows only the owning account to unlock director access", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/director-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "acct_token_01", pin: "112233" }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_ready_01",
+            name: "Ready Match Room",
+            pin: "112233",
+            status: "ready",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [],
+        [
+          {
+            access_token: "acct_token_01",
+            email: "club@example.com",
+            id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      room: {
+        id: "room_ready_01",
+        pin: "112233",
+      },
+    });
   });
 });
 
@@ -1620,5 +1826,286 @@ describe("api /api/v1 room logo assets", () => {
     expect(payload.asset.publicUrl).toContain("/api/v1/assets/");
     expect(r2Bucket.storedKeys[0]).toMatch(/^rooms\/room_asset_01\/left_logo_url\/asset_/);
     expect(r2Bucket.deletedKeys).toEqual(["rooms/room_asset_01/left_logo_url/old.webp"]);
+  });
+
+  it("uploads a temporary ad video to R2 while preserving previous ad videos until the plan limit", async () => {
+    const r2Bucket = createMockR2Bucket();
+    const form = new FormData();
+    form.set("field", "ad_video_url");
+    form.set("file", new Blob(["mp4-video"], { type: "video/mp4" }), "promo.mp4");
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_ad_asset_01/assets", {
+        method: "POST",
+        body: form,
+      }),
+      createBindings(
+        {
+          R2_ASSETS: r2Bucket,
+        } as Partial<Bindings>,
+        [
+          {
+            id: "room_ad_asset_01",
+            name: "Ad Asset Room",
+            pin: "123124",
+            status: "active",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [
+          {
+            ad_video_url: "https://cdn.example.com/old-ad.mp4",
+            room_id: "room_ad_asset_01",
+            scoreboard_active: 0,
+          },
+        ],
+        [
+          {
+            amount_cents: 3500,
+            currency: "usd",
+            duration_minutes: 360,
+            id: "pass_ad_asset_01",
+            package_id: "matchday-pro",
+            payment_provider: "stripe",
+            room_id: "room_ad_asset_01",
+            status: "paid",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [
+          {
+            id: "asset_old_ad",
+            overlay_field: "ad_video_url",
+            public_url: "https://cdn.example.com/old-ad.mp4",
+            r2_key: "rooms/room_ad_asset_01/ad_video_url/old.mp4",
+            room_id: "room_ad_asset_01",
+            tenant_id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      asset: { field: string; publicUrl: string; r2Key: string };
+      success: boolean;
+    };
+
+    expect(payload.success).toBe(true);
+    expect(payload.asset.field).toBe("ad_video_url");
+    expect(payload.asset.publicUrl).toContain("/api/v1/assets/");
+    expect(r2Bucket.storedKeys[0]).toMatch(/^rooms\/room_ad_asset_01\/ad_video_url\/asset_.*\.mp4$/);
+    expect(r2Bucket.deletedKeys).toEqual([]);
+  });
+
+  it("rejects non-video files for temporary ad video uploads", async () => {
+    const form = new FormData();
+    form.set("field", "ad_video_url");
+    form.set("file", new Blob(["not-video"], { type: "image/webp" }), "promo.webp");
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_ad_asset_02/assets", {
+        method: "POST",
+        body: form,
+      }),
+      createBindings(
+        {
+          R2_ASSETS: createMockR2Bucket(),
+        } as Partial<Bindings>,
+        [
+          {
+            id: "room_ad_asset_02",
+            name: "Ad Asset Room",
+            pin: "123125",
+            status: "active",
+            tenant_id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      message: "Ad video upload must be a video file",
+    });
+  });
+
+  it("deletes temporary room assets from R2 when a room is expired", async () => {
+    const r2Bucket = createMockR2Bucket();
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/admin/rooms/room_cleanup_01/expire", {
+        method: "POST",
+        headers: { Authorization: "Bearer admin-secret" },
+      }),
+      createBindings(
+        {
+          R2_ASSETS: r2Bucket,
+        } as Partial<Bindings>,
+        [
+          {
+            id: "room_cleanup_01",
+            name: "Cleanup Room",
+            pin: "123126",
+            status: "active",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [],
+        [],
+        [
+          {
+            id: "asset_logo",
+            overlay_field: "left_logo_url",
+            public_url: "https://cdn.example.com/logo.webp",
+            r2_key: "rooms/room_cleanup_01/left_logo_url/logo.webp",
+            room_id: "room_cleanup_01",
+            tenant_id: "tenant_01",
+          },
+          {
+            id: "asset_ad",
+            overlay_field: "ad_video_url",
+            public_url: "https://cdn.example.com/ad.mp4",
+            r2_key: "rooms/room_cleanup_01/ad_video_url/ad.mp4",
+            room_id: "room_cleanup_01",
+            tenant_id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    expect(r2Bucket.deletedKeys).toEqual([
+      "rooms/room_cleanup_01/left_logo_url/logo.webp",
+      "rooms/room_cleanup_01/ad_video_url/ad.mp4",
+    ]);
+  });
+
+  it("rejects a second temporary ad video on the starter package", async () => {
+    const form = new FormData();
+    form.set("field", "ad_video_url");
+    form.set("file", new Blob(["mp4-video"], { type: "video/mp4" }), "second.mp4");
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_starter_ads/assets", {
+        method: "POST",
+        body: form,
+      }),
+      createBindings(
+        {
+          R2_ASSETS: createMockR2Bucket(),
+        } as Partial<Bindings>,
+        [
+          {
+            id: "room_starter_ads",
+            name: "Starter Ads",
+            pin: "123127",
+            status: "active",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 1500,
+            currency: "usd",
+            duration_minutes: 180,
+            id: "pass_starter_ads",
+            package_id: "starter-live",
+            payment_provider: "stripe",
+            room_id: "room_starter_ads",
+            status: "paid",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [
+          {
+            id: "asset_existing_ad",
+            overlay_field: "ad_video_url",
+            public_url: "https://cdn.example.com/ad-1.mp4",
+            r2_key: "rooms/room_starter_ads/ad_video_url/ad-1.mp4",
+            room_id: "room_starter_ads",
+            tenant_id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      message: "Starter Live allows up to 1 ad video for this room",
+    });
+  });
+
+  it("allows two temporary ad videos on pro and rejects the third", async () => {
+    const r2Bucket = createMockR2Bucket();
+    const bindings = createBindings(
+      {
+        R2_ASSETS: r2Bucket,
+      } as Partial<Bindings>,
+      [
+        {
+          id: "room_pro_ads",
+          name: "Pro Ads",
+          pin: "123128",
+          status: "active",
+          tenant_id: "tenant_01",
+        },
+      ],
+      [],
+      [
+        {
+          amount_cents: 3500,
+          currency: "usd",
+          duration_minutes: 360,
+          id: "pass_pro_ads",
+          package_id: "matchday-pro",
+          payment_provider: "stripe",
+          room_id: "room_pro_ads",
+          status: "paid",
+          tenant_id: "tenant_01",
+        },
+      ],
+      [],
+      [
+        {
+          id: "asset_existing_ad",
+          overlay_field: "ad_video_url",
+          public_url: "https://cdn.example.com/ad-1.mp4",
+          r2_key: "rooms/room_pro_ads/ad_video_url/ad-1.mp4",
+          room_id: "room_pro_ads",
+          tenant_id: "tenant_01",
+        },
+      ]
+    );
+
+    const secondForm = new FormData();
+    secondForm.set("field", "ad_video_url");
+    secondForm.set("file", new Blob(["mp4-video-2"], { type: "video/mp4" }), "second.mp4");
+    const second = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_pro_ads/assets", {
+        method: "POST",
+        body: secondForm,
+      }),
+      bindings
+    );
+    expect(second.status).toBe(200);
+
+    const thirdForm = new FormData();
+    thirdForm.set("field", "ad_video_url");
+    thirdForm.set("file", new Blob(["mp4-video-3"], { type: "video/mp4" }), "third.mp4");
+    const third = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_pro_ads/assets", {
+        method: "POST",
+        body: thirdForm,
+      }),
+      bindings
+    );
+    expect(third.status).toBe(403);
+    expect(r2Bucket.storedKeys).toHaveLength(1);
   });
 });

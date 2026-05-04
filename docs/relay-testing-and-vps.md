@@ -108,6 +108,12 @@ CPUQuota=200%
 WantedBy=multi-user.target
 ```
 
+The same production templates are checked in under `ops/`:
+
+- `ops/relay.env.example`
+- `ops/live-studio-relay.service`
+- `ops/Caddyfile.relay.example`
+
 Expose it through HTTPS/WSS using Cloudflare Tunnel, Nginx, or Caddy. The Worker should store the secure relay URL:
 
 ```bash

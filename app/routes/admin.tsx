@@ -574,6 +574,7 @@ type PackageDraft = {
   description: string;
   durationMinutes: string;
   featuresText: string;
+  maxAdVideos: string;
   maxCameras: string;
   maxRooms: string;
   name: string;
@@ -587,6 +588,7 @@ function createPackageDraft(item: StreamingPackage): PackageDraft {
     description: item.description,
     durationMinutes: String(item.duration_minutes),
     featuresText: item.features.join("\n"),
+    maxAdVideos: String(item.max_ad_videos),
     maxCameras: String(item.max_cameras),
     maxRooms: String(item.max_rooms),
     name: item.name,
@@ -630,6 +632,7 @@ function PackageEditor({
         .split("\n")
         .map((feature) => feature.trim())
         .filter((feature) => feature.length > 0),
+      max_ad_videos: parsePositiveInteger(draft.maxAdVideos, item.max_ad_videos),
       max_cameras: parsePositiveInteger(draft.maxCameras, item.max_cameras),
       max_rooms: parsePositiveInteger(draft.maxRooms, item.max_rooms),
       name: draft.name.trim() || item.name,
@@ -699,6 +702,12 @@ function PackageEditor({
             label="Max cameras"
             value={draft.maxCameras}
             onChange={(value) => updateDraft("maxCameras", value)}
+          />
+          <TextField
+            inputMode="numeric"
+            label="Max ad videos"
+            value={draft.maxAdVideos}
+            onChange={(value) => updateDraft("maxAdVideos", value)}
           />
           <TextField
             inputMode="numeric"
