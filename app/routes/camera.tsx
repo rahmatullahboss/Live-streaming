@@ -22,7 +22,7 @@ import {
   removeRoomCamera,
 } from "~/lib/sfu-room";
 import { verifyRoomPin, type RoomSummary } from "~/lib/realtime";
-import { getCameraPublishConstraints } from "~/lib/webrtc/camera-quality";
+import { getCameraPublishConstraints, getQualityConstraints } from "~/lib/webrtc/camera-quality";
 
 type CameraSession = {
   cameraId: string;
@@ -42,6 +42,7 @@ export default function CameraPublisher() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [currentOrientation, setCurrentOrientation] = useState<"portrait" | "landscape">("portrait");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const heartbeatRef = useRef<number | null>(null);
@@ -130,19 +131,56 @@ export default function CameraPublisher() {
       return;
     }
 
-    function applyLandscapeConstraints() {
-      void videoTrack.applyConstraints(getCameraPublishConstraints()).catch(() => {
-        setNotice("Landscape mode retrying");
-      });
+    function getOrientation(): "portrait" | "landscape" {
+      // Try Screen Orientation API first
+      if (screen.orientation) {
+        const angle = screen.orientation.angle;
+        if (angle === 90 || angle === 270) {
+          return "landscape";
+        }
+        return "portrait";
+      }
+      // Fallback: check window dimensions
+      return window.innerWidth > window.innerHeight ? "landscape" : "portrait";
     }
 
-    applyLandscapeConstraints();
-    window.addEventListener("orientationchange", applyLandscapeConstraints);
-    window.addEventListener("resize", applyLandscapeConstraints);
+    async function applyOrientationConstraints() {
+      const orientation = getOrientation();
+      const landscape = orientation === "landscape";
+
+      setCurrentOrientation(orientation);
+      setIsLandscape(landscape);
+
+      const constraints = getQualityConstraints("hd", landscape);
+      try {
+        await videoTrack.applyConstraints(constraints);
+        setNotice(landscape ? "Landscape mode" : "Portrait mode");
+      } catch {
+        setNotice("Orientation retrying");
+      }
+    }
+
+    // Apply initial orientation
+    void applyOrientationConstraints();
+
+    // Listen for orientation changes
+    window.addEventListener("orientationchange", () => void applyOrientationConstraints());
+    window.addEventListener("resize", () => void applyOrientationConstraints());
+
+    // Also listen to screen orientation API if available
+    if (screen.orientation) {
+      const handleOrientationChange = () => void applyOrientationConstraints();
+      screen.orientation.addEventListener("change", handleOrientationChange);
+      return () => {
+        window.removeEventListener("orientationchange", handleOrientationChange);
+        window.removeEventListener("resize", handleOrientationChange);
+        screen.orientation?.removeEventListener("change", handleOrientationChange);
+      };
+    }
 
     return () => {
-      window.removeEventListener("orientationchange", applyLandscapeConstraints);
-      window.removeEventListener("resize", applyLandscapeConstraints);
+      window.removeEventListener("orientationchange", () => void applyOrientationConstraints());
+      window.removeEventListener("resize", () => void applyOrientationConstraints());
     };
   }, [session]);
 
@@ -249,18 +287,19 @@ export default function CameraPublisher() {
   async function handleRotation() {
     if (!session) return;
 
-    setNotice("Switching to landscape");
+    const targetLandscape = !isLandscape;
+    setNotice(targetLandscape ? "Switching to landscape" : "Switching to portrait");
     const oldTrack = session.stream.getVideoTracks()[0];
 
     try {
-      // Get new landscape stream first (before stopping old track)
+      // Get new stream with target orientation
       const newStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
         },
         video: {
-          ...getCameraPublishConstraints(),
+          ...getQualityConstraints("hd", targetLandscape),
           facingMode: { ideal: "environment" },
         },
       });
@@ -276,10 +315,11 @@ export default function CameraPublisher() {
       setSession((prev) => prev ? { ...prev, stream: newStream } : null);
 
       // Update UI state
-      setIsLandscape(true);
-      setNotice("Landscape mode active");
+      setIsLandscape(targetLandscape);
+      setCurrentOrientation(targetLandscape ? "landscape" : "portrait");
+      setNotice(targetLandscape ? "Landscape mode active" : "Portrait mode active");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to switch to landscape");
+      setError(err instanceof Error ? err.message : "Failed to switch orientation");
       setNotice("Rotation failed");
     }
   }
@@ -400,7 +440,7 @@ export default function CameraPublisher() {
               <MiniPanel label="Video" value={videoEnabled ? "On" : "Off"} />
               <MiniPanel label="Audio" value={audioEnabled ? "On" : "Off"} />
               <MiniPanel label="SFU" value="Live" />
-              <MiniPanel label="Orientation" value={isLandscape ? "Landscape" : "Portrait"} />
+              <MiniPanel label="Orientation" value={currentOrientation === "landscape" ? "Landscape" : "Portrait"} />
             </div>
 
             <div className="grid grid-cols-3 gap-3">
