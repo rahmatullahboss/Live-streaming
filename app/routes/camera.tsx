@@ -144,28 +144,59 @@ export default function CameraPublisher() {
       return window.innerWidth > window.innerHeight ? "landscape" : "portrait";
     }
 
-    async function applyOrientationConstraints() {
+    async function handleAutoRotation() {
       const orientation = getOrientation();
       const landscape = orientation === "landscape";
 
-      setCurrentOrientation(orientation);
-      setIsLandscape(landscape);
+      // Only change if different from current
+      if (landscape === isLandscape) {
+        return;
+      }
 
-      const constraints = getQualityConstraints("hd", landscape);
+      setNotice(landscape ? "Switching to landscape" : "Switching to portrait");
+
+      const oldTrack = session.stream.getVideoTracks()[0];
+      const audioTrack = session.stream.getAudioTracks()[0] ?? null;
+
       try {
-        await videoTrack.applyConstraints(constraints);
+        // Re-acquire camera with new orientation constraints
+        const newStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+          video: {
+            ...getQualityConstraints("hd", landscape),
+            facingMode: { ideal: "environment" },
+          },
+        });
+        const newVideoTrack = newStream.getVideoTracks()[0];
+
+        // Stop old video track
+        oldTrack.stop();
+
+        // Replace track on SFU client
+        await session.client.replaceTrack(newVideoTrack);
+
+        // Update session stream reference
+        setSession((prev) => prev ? { ...prev, stream: newStream } : null);
+
+        // Update UI state
+        setCurrentOrientation(orientation);
+        setIsLandscape(landscape);
         setNotice(landscape ? "Landscape mode" : "Portrait mode");
-      } catch {
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Orientation switch failed");
         setNotice("Orientation retrying");
       }
     }
 
     // Apply initial orientation
-    void applyOrientationConstraints();
+    void handleAutoRotation();
 
     // Listen for orientation changes
-    window.addEventListener("orientationchange", () => void applyOrientationConstraints());
-    window.addEventListener("resize", () => void applyOrientationConstraints());
+    window.addEventListener("orientationchange", () => void handleAutoRotation());
+    window.addEventListener("resize", () => void handleAutoRotation());
 
     // Also listen to screen orientation API if available
     if (screen.orientation) {

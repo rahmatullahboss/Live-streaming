@@ -1138,9 +1138,8 @@ function buildAssetPublicUrl(c: Context<{ Bindings: Bindings }>, key: string): s
   const hasVideoOrImageExt = lastDotIndex > 0 && [".mp4", ".webm", ".mov", ".m4v", ".ogg", ".ogv", ".m3u8", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"].some((ext) => key.toLowerCase().endsWith(ext));
 
   if (hasVideoOrImageExt) {
-    const extension = key.slice(lastDotIndex);
     const keyWithoutExt = key.slice(0, lastDotIndex);
-    return `${getPublicOrigin(c)}/api/v1/assets/${toBase64UrlText(keyWithoutExt)}/asset${extension}`;
+    return `${getPublicOrigin(c)}/api/v1/assets/${toBase64UrlText(keyWithoutExt)}`;
   }
 
   return `${getPublicOrigin(c)}/api/v1/assets/${toBase64UrlText(key)}`;
@@ -2635,6 +2634,20 @@ app.delete("/v1/rooms/:id/assets", async (c) => {
   }
 
   return jsonSuccess(c, { deleted: Boolean(currentAsset), field });
+});
+
+app.get("/v1/assets/:encodedKey", async (c) => {
+  const key = fromBase64UrlText(c.req.param("encodedKey"));
+  const object = await getR2AssetsBucket(c).get(key);
+  if (!object) {
+    throw new HTTPException(404, { message: "Asset not found" });
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  headers.set("ETag", object.httpEtag);
+  return new Response(object.body, { headers });
 });
 
 app.get("/v1/assets/:encodedKey", async (c) => {
