@@ -26,5 +26,10 @@ export function getQualityConstraints(quality: CameraQuality, isLandscape: boole
 }
 
 export function getCameraPublishConstraints(): CameraVideoConstraintConfig {
-  return getQualityConstraints("hd", true);
+  const isLandscape =
+    typeof screen !== "undefined" && screen.orientation
+      ? screen.orientation.angle === 90 || screen.orientation.angle === 270
+      : typeof window !== "undefined" && window.innerWidth > window.innerHeight;
+
+  return getQualityConstraints("hd", isLandscape);
 }

@@ -8,6 +8,8 @@ export type StreamGuardState = {
   title: string;
 };
 
+export type RelayStatusLike = "idle" | "live" | "starting" | "stopping";
+
 export function getProgramBadgeLabel(
   programSource: OverlayConfig["program_source"],
   adTitle: string | null | undefined
@@ -45,4 +47,24 @@ export function getStreamGuardState(
     message: "Keep this director dashboard visible and in the foreground while streaming.",
     title: "Foreground required",
   };
+}
+
+export function getRelayStatusText(status: RelayStatusLike, errorMessage: string | null): string {
+  if (errorMessage?.trim()) {
+    return errorMessage.trim();
+  }
+
+  if (status === "live") {
+    return "Streaming Active";
+  }
+
+  if (status === "starting") {
+    return "Starting relay...";
+  }
+
+  if (status === "stopping") {
+    return "Stopping relay...";
+  }
+
+  return "Waiting for Input";
 }

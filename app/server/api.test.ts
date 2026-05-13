@@ -9,17 +9,22 @@ type MockRoomRecord = {
   facebook_output_url?: string | null;
   facebook_stream_key?: string | null;
   id: string;
+  is_paused?: number | null;
   name: string;
+  paused_at?: string | null;
   pin: string;
   scoring_token?: string | null;
+  session_started_at?: string | null;
   status?: string | null;
   tenant_id?: string | null;
+  total_seconds_used?: number | null;
   youtube_output_url?: string | null;
   youtube_stream_key?: string | null;
 };
 
 type MockOverlayRecord = {
   ad_video_url?: string | null;
+  external_overlay_active?: number | null;
   external_scoreboard_url?: string | null;
   left_logo_url?: string | null;
   room_id: string;
@@ -138,6 +143,14 @@ function createMockDb(
         };
       }
 
+      if (this.sql.includes("FROM rooms") && this.sql.includes("tenant_id = ?") && this.sql.includes("status = 'active'")) {
+        return {
+          results: Array.from(rooms.values()).filter(
+            (room) => room.tenant_id === String(this.values[0]) && room.status === "active"
+          ),
+        };
+      }
+
       if (this.sql.includes("SELECT * FROM rooms")) {
         return { results: Array.from(rooms.values()) };
       }
@@ -202,6 +215,17 @@ function createMockDb(
         return { row_count: audits.size };
       }
 
+      if (this.sql.includes("SUM(duration_minutes)") && this.sql.includes("FROM room_passes")) {
+        const totalMinutes = Array.from(roomPasses.values())
+          .filter(
+            (roomPass) =>
+              roomPass.tenant_id === String(this.values[0]) &&
+              roomPass.status === "paid"
+          )
+          .reduce((sum, roomPass) => sum + (roomPass.duration_minutes ?? 0), 0);
+        return { total_minutes: totalMinutes };
+      }
+
       if (this.sql.includes("COUNT(*) AS active_count")) {
         const activeCount = Array.from(cameras.values()).filter(
           (camera) =>
@@ -210,6 +234,24 @@ function createMockDb(
             camera.id !== String(this.values[1])
         ).length;
         return { active_count: activeCount };
+      }
+
+      if (this.sql.includes("FROM rooms") && this.sql.includes("INNER JOIN room_passes")) {
+        const tenantId = String(this.values[0]);
+        const matchedRooms = Array.from(rooms.values()).filter((room) => {
+          if (room.tenant_id !== tenantId) return false;
+          const pass = Array.from(roomPasses.values()).find(
+            (p) => p.room_id === room.id
+          );
+          if (!pass || pass.status !== "paid") return false;
+          if (room.status === "ready") return true;
+          if (room.status === "active") {
+            if (!room.expires_at) return true;
+            return new Date(room.expires_at).getTime() > Date.now();
+          }
+          return false;
+        });
+        return { room_count: matchedRooms.length };
       }
 
       if (this.sql.includes("SELECT * FROM rooms WHERE id = ?")) {
@@ -308,10 +350,12 @@ function createMockDb(
           checkout_session_id: checkoutSessionId ? String(checkoutSessionId) : null,
           customer_email: customerEmail ? String(customerEmail) : null,
           id: String(id),
+          is_paused: 0,
           name: String(name),
           pin: String(pin),
           status: String(status),
           tenant_id: tenantId ? String(tenantId) : null,
+          total_seconds_used: 0,
         });
       }
 
@@ -349,6 +393,73 @@ function createMockDb(
       if (
         this.sql.includes("UPDATE rooms") &&
         this.sql.includes("status = 'active'") &&
+        this.sql.includes("is_paused = 0") &&
+        this.sql.includes("WHERE id = ?")
+      ) {
+        const roomId = String(this.values.at(-1));
+        const room = rooms.get(roomId);
+        if (room) {
+          room.status = "active";
+          room.is_paused = 0;
+          room.paused_at = null;
+          room.total_seconds_used = 0;
+          room.expires_at = String(this.values[3]);
+          room.session_started_at = String(this.values[4]);
+        }
+      }
+
+      if (
+        this.sql.includes("UPDATE rooms") &&
+        this.sql.includes("status = 'active'") &&
+        this.sql.includes("expires_at = ?") &&
+        this.sql.includes("is_paused = 0") &&
+        this.sql.includes("total_seconds_used = ?") &&
+        this.sql.includes("WHERE id = ?")
+      ) {
+        const roomId = String(this.values.at(-1));
+        const room = rooms.get(roomId);
+        if (room) {
+          room.status = "active";
+          room.expires_at = String(this.values[0]);
+          room.is_paused = 0;
+          room.paused_at = null;
+          room.total_seconds_used = Number(this.values[1]);
+        }
+      }
+
+      if (
+        this.sql.includes("UPDATE rooms") &&
+        this.sql.includes("is_paused = 1") &&
+        this.sql.includes("WHERE id = ?")
+      ) {
+        const roomId = String(this.values.at(-1));
+        const room = rooms.get(roomId);
+        if (room) {
+          room.is_paused = 1;
+          room.paused_at = String(this.values[1]);
+          room.total_seconds_used = Number(this.values[0]);
+        }
+      }
+
+      if (
+        this.sql.includes("UPDATE rooms") &&
+        this.sql.includes("is_paused = 0") &&
+        this.sql.includes("paused_at = NULL") &&
+        this.sql.includes("WHERE id = ?")
+      ) {
+        const roomId = String(this.values.at(-1));
+        const room = rooms.get(roomId);
+        if (room) {
+          room.is_paused = 0;
+          room.paused_at = null;
+          room.session_started_at = String(this.values[1]);
+          room.expires_at = String(this.values[0]);
+        }
+      }
+
+      if (
+        this.sql.includes("UPDATE rooms") &&
+        this.sql.includes("status = 'active'") &&
         this.sql.includes("WHERE id = ?")
       ) {
         const roomId = String(this.values.at(-1));
@@ -357,6 +468,10 @@ function createMockDb(
           room.status = "active";
           room.expires_at = String(this.values[0]);
         }
+      }
+
+      if (this.sql.includes("INSERT INTO room_time_sessions")) {
+        // no-op for mock
       }
 
       if (this.sql.includes("UPDATE room_passes") && this.sql.includes("WHERE id = ?")) {
@@ -1050,6 +1165,298 @@ describe("api /rooms/:id/overlays", () => {
       team2_score: 2,
     });
   });
+
+  it("normalizes cricket scoring data posted through the scorer link", async () => {
+    const bindings = createBindings(
+      {},
+      [
+        {
+          id: "demo-room-01",
+          name: "Demo Studio",
+          pin: "123456",
+          scoring_token: "score_token_01",
+        },
+      ]
+    );
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/scoring/score_token_01", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scoring_data: {
+            balls: 7,
+            current_rate: "0.00",
+            max_overs: "20",
+            overs: "0.0",
+            runs: 10,
+            target: "121",
+            wickets: 1,
+          },
+          sport: "cricket",
+        }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+
+    const overlayResponse = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      bindings
+    );
+    await expect(overlayResponse.json()).resolves.toMatchObject({
+      scoring_data: {
+        balls: 7,
+        balls_in_over: 1,
+        current_rate: "8.57",
+        overs: "1.1",
+        required_rate: "5.89",
+        runs: 10,
+        wickets: 1,
+      },
+    });
+  });
+
+  it("normalizes stored cricket scoring data when reading overlays", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      createBindings(
+        {},
+        [{ id: "demo-room-01", name: "Demo Studio", pin: "123456" }],
+        [
+          {
+            room_id: "demo-room-01",
+            scoring_data: JSON.stringify({
+              balls: 8,
+              current_rate: "0.00",
+              max_overs: "20",
+              overs: "0.0",
+              runs: 13,
+              target: "121",
+              wickets: 2,
+            }),
+            sport: "cricket",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      scoring_data: {
+        balls: 8,
+        balls_in_over: 2,
+        current_rate: "9.75",
+        overs: "1.2",
+        required_rate: "5.79",
+        runs: 13,
+        wickets: 2,
+      },
+      sport: "cricket",
+    });
+  });
+
+  it("normalizes scorer updates against the stored cricket sport when sport is omitted", async () => {
+    const bindings = createBindings(
+      {},
+      [
+        {
+          id: "demo-room-01",
+          name: "Demo Studio",
+          pin: "123456",
+          scoring_token: "score_token_01",
+        },
+      ],
+      [{ room_id: "demo-room-01", sport: "cricket" }]
+    );
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/scoring/score_token_01", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scoring_data: {
+            balls: 8,
+            current_rate: "0.00",
+            max_overs: "20",
+            overs: "0.0",
+            runs: 13,
+            target: "121",
+            wickets: 2,
+          },
+        }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+
+    const overlayResponse = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      bindings
+    );
+    await expect(overlayResponse.json()).resolves.toMatchObject({
+      scoring_data: {
+        balls_in_over: 2,
+        current_rate: "9.75",
+        overs: "1.2",
+        required_rate: "5.79",
+      },
+      sport: "cricket",
+    });
+  });
+
+  it("falls back to empty scoring data instead of crashing on malformed overlay JSON", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      createBindings(
+        {},
+        [{ id: "demo-room-01", name: "Demo Studio", pin: "123456" }],
+        [{ room_id: "demo-room-01", scoring_data: "{bad-json", sport: "cricket" }]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      scoring_data: {
+        balls: 0,
+        current_rate: "0.00",
+        overs: "0.0",
+        runs: 0,
+        wickets: 0,
+      },
+      sport: "cricket",
+    });
+  });
+
+  it("normalizes generic internal overlay builder fields without external iframe rendering", async () => {
+    const bindings = createBindings(
+      {},
+      [{ id: "demo-room-01", name: "Demo Studio", pin: "123456" }],
+      [{ room_id: "demo-room-01", sport: "generic" }]
+    );
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scoreboard_active: 1,
+          scoring_data: {
+            overlay_position: "lower",
+            overlay_preset: "lower-third",
+            overlay_primary_label: "Player",
+            overlay_primary_value: "Rahim",
+            overlay_subtitle: "Goal scorer",
+            overlay_title: "Match Update",
+          },
+          sport: "generic",
+        }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+
+    const overlayResponse = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      bindings
+    );
+    await expect(overlayResponse.json()).resolves.toMatchObject({
+      scoreboard_active: 1,
+      scoring_data: {
+        overlay_position: "lower",
+        overlay_preset: "lower-third",
+        overlay_primary_label: "Player",
+        overlay_primary_value: "Rahim",
+        overlay_secondary_label: "Team 2",
+        overlay_subtitle: "Goal scorer",
+        overlay_title: "Match Update",
+      },
+      sport: "generic",
+    });
+  });
+
+  it("returns external_overlay_active defaulting to 0", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      createBindings(
+        {},
+        [{ id: "demo-room-01", name: "Demo Studio", pin: "123456" }]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      external_overlay_active: 0,
+      scoreboard_active: 0,
+    });
+  });
+
+  it("sets external_overlay_active independently from scoreboard_active", async () => {
+    const bindings = createBindings(
+      {},
+      [{ id: "demo-room-01", name: "Demo Studio", pin: "123456" }],
+      [{ room_id: "demo-room-01", scoreboard_active: 0, external_overlay_active: 0 }]
+    );
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          external_overlay_active: 1,
+          external_scoreboard_url: "https://scores.example.com/overlay/match-1",
+          scoreboard_active: 0,
+        }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+
+    const getResponse = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      bindings
+    );
+    const body = await getResponse.json();
+    expect(body).toMatchObject({
+      external_overlay_active: 1,
+      external_scoreboard_url: "https://scores.example.com/overlay/match-1",
+      scoreboard_active: 0,
+    });
+  });
+
+  it("keeps external_overlay_active and scoreboard_active independent on partial updates", async () => {
+    const bindings = createBindings(
+      {},
+      [{ id: "demo-room-01", name: "Demo Studio", pin: "123456" }],
+      [{ room_id: "demo-room-01", scoreboard_active: 1, external_overlay_active: 1 }]
+    );
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scoreboard_active: 0 }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+
+    const getResponse = await app.fetch(
+      new Request("https://example.com/api/rooms/demo-room-01/overlays"),
+      bindings
+    );
+    const body = await getResponse.json();
+    expect(body).toMatchObject({
+      external_overlay_active: 1,
+      scoreboard_active: 0,
+    });
+  });
 });
 
 describe("api /api/v1/room-passes", () => {
@@ -1085,10 +1492,7 @@ describe("api /api/v1/room-passes", () => {
     await expect(response.json()).resolves.toMatchObject({
       success: true,
       checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_room_pass",
-      room: {
-        name: "Friday Night Match",
-        status: "pending_payment",
-      },
+      passId: expect.any(String),
     });
 
     const stripeBody = fetchMock.mock.calls[0]?.[1]?.body;
@@ -1143,11 +1547,6 @@ describe("api /api/v1/room-passes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       success: true,
-      room: {
-        id: "room_paid_01",
-        pin: "908172",
-        status: "ready",
-      },
     });
   });
 
@@ -1231,12 +1630,12 @@ describe("api /api/v1/room-passes", () => {
     expect(response.status).toBe(401);
   });
 
-  it("allows only the owning account to unlock director access", async () => {
+  it("allows the owning account to unlock director access with the room id only", async () => {
     const response = await app.fetch(
       new Request("https://example.com/api/v1/director-access", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken: "acct_token_01", pin: "112233" }),
+        body: JSON.stringify({ accessToken: "acct_token_01", roomId: "room_ready_01" }),
       }),
       createBindings(
         {},
@@ -1268,6 +1667,43 @@ describe("api /api/v1/room-passes", () => {
         id: "room_ready_01",
         pin: "112233",
       },
+    });
+  });
+
+  it("does not unlock director access with only the room pin", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/director-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "acct_token_01", pin: "112233" }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_ready_01",
+            name: "Ready Match Room",
+            pin: "112233",
+            status: "ready",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [],
+        [
+          {
+            access_token: "acct_token_01",
+            email: "club@example.com",
+            id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      message: "Room id is required",
     });
   });
 });
@@ -1334,10 +1770,6 @@ describe("api /api/v1 manual bKash room passes", () => {
         bkashMerchantNumber: "01700000000",
         status: "pending_manual_review",
       },
-      room: {
-        name: "Manual Paid Match",
-        status: "pending_manual_review",
-      },
     });
   });
 
@@ -1390,11 +1822,6 @@ describe("api /api/v1 manual bKash room passes", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       success: true,
-      room: {
-        id: "room_manual_01",
-        pin: "665544",
-        status: "ready",
-      },
     });
   });
 });
@@ -1416,10 +1843,11 @@ describe("api /api/v1 package catalog and admin controls", () => {
       packages: expect.arrayContaining([
         expect.objectContaining({
           active: 1,
+          currency: "bdt",
           duration_minutes: 180,
           id: "starter-live",
           name: "Starter Live",
-          price_cents: 1500,
+          price_cents: 15000,
         }),
       ]),
     });
@@ -1467,12 +1895,8 @@ describe("api /api/v1 package catalog and admin controls", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       success: true,
-      durationMinutes: 360,
-      room: {
-        name: "Tournament Final",
-        status: "pending_payment",
-        tenant_id: "tenant_01",
-      },
+      checkoutUrl: "https://checkout.stripe.com/c/pay/cs_matchday_pro",
+      passId: expect.any(String),
     });
 
     const stripeBody = String(fetchMock.mock.calls[0]?.[1]?.body);
@@ -1691,6 +2115,127 @@ describe("api /api/v1 package catalog and admin controls", () => {
           target_type: "package",
         }),
       ],
+    });
+  });
+
+  it("updates only the price_cents field when other fields are omitted", async () => {
+    const bindings = createBindings();
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/admin/packages/matchday-pro", {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer admin-secret",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ price_cents: 50000 }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      package: {
+        id: "matchday-pro",
+        price_cents: 50000,
+        duration_minutes: 360,
+        max_rooms: 2,
+        max_cameras: 5,
+        max_ad_videos: 2,
+        name: "Matchday Pro",
+      },
+    });
+  });
+
+  it("accepts a price_cents of 0 when explicitly updating to free", async () => {
+    const bindings = createBindings();
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/admin/packages/starter-live", {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer admin-secret",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ price_cents: 0 }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      package: {
+        id: "starter-live",
+        price_cents: 0,
+      },
+    });
+  });
+
+  it("updates max_ad_videos independently from other fields", async () => {
+    const bindings = createBindings();
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/admin/packages/season-ops", {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer admin-secret",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ max_ad_videos: 10 }),
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      package: {
+        id: "season-ops",
+        max_ad_videos: 10,
+        max_cameras: 8,
+        max_rooms: 5,
+        price_cents: 99000,
+      },
+    });
+  });
+
+  it("returns 404 when updating a non-existent package", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/admin/packages/non-existent-pkg", {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer admin-secret",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "Ghost" }),
+      }),
+      createBindings()
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("gracefully handles an empty PATCH body as a no-op", async () => {
+    const bindings = createBindings();
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/admin/packages/starter-live", {
+        method: "PATCH",
+        headers: { Authorization: "Bearer admin-secret" },
+      }),
+      bindings
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      package: {
+        id: "starter-live",
+        name: "Starter Live",
+        price_cents: 15000,
+        duration_minutes: 180,
+        max_rooms: 1,
+        max_cameras: 3,
+        max_ad_videos: 1,
+      },
     });
   });
 
@@ -2107,5 +2652,393 @@ describe("api /api/v1 room logo assets", () => {
     );
     expect(third.status).toBe(403);
     expect(r2Bucket.storedKeys).toHaveLength(1);
+  });
+});
+
+describe("api /api/v1 shared time pool and room controls", () => {
+  it("enforces max_rooms when creating manual room passes", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/manual-room-passes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessToken: "token_tenant_01",
+          bkashSenderNumber: "01711111111",
+          bkashTransactionId: "ABCDEF123456",
+          packageId: "starter-live",
+          roomName: "Extra Room",
+        }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_existing",
+            name: "Existing Room",
+            pin: "111111",
+            status: "ready",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 15000,
+            currency: "bdt",
+            duration_minutes: 180,
+            id: "pass_existing",
+            package_id: "starter-live",
+            payment_provider: "bkash_manual",
+            room_id: "room_existing",
+            status: "paid",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [
+          {
+            access_token: "token_tenant_01",
+            email: "test@example.com",
+            id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { success: boolean; payment: { id: string } };
+    expect(payload.success).toBe(true);
+    expect(payload.payment.id).toBeDefined();
+  });
+
+  it("enforces max_rooms when creating Stripe checkout for logged-in tenant", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.toString().includes("api.stripe.com/v1/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({
+            id: "cs_test_123",
+            url: "https://checkout.stripe.com/test",
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/room-passes/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessToken: "token_tenant_01",
+          customerEmail: "test@example.com",
+          packageId: "starter-live",
+        }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_existing",
+            name: "Existing Room",
+            pin: "111111",
+            status: "ready",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 15000,
+            currency: "bdt",
+            duration_minutes: 180,
+            id: "pass_existing",
+            package_id: "starter-live",
+            payment_provider: "stripe",
+            room_id: "room_existing",
+            status: "paid",
+            tenant_id: "tenant_01",
+          },
+        ],
+        [
+          {
+            access_token: "token_tenant_01",
+            email: "test@example.com",
+            id: "tenant_01",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { success: boolean; passId: string };
+    expect(payload.success).toBe(true);
+    expect(payload.passId).toBeDefined();
+    vi.restoreAllMocks();
+  });
+
+  it("rejects room start when tenant time pool is exhausted", async () => {
+    const pastStartedAt = new Date(Date.now() - 120_000).toISOString();
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_pool_02/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "token_tenant_pool" }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_pool_01",
+            is_paused: 0,
+            name: "Draining Room",
+            pin: "222221",
+            session_started_at: pastStartedAt,
+            status: "active",
+            tenant_id: "tenant_pool",
+            total_seconds_used: 0,
+          },
+          {
+            id: "room_pool_02",
+            is_paused: 0,
+            name: "Pool Room",
+            pin: "222222",
+            status: "ready",
+            tenant_id: "tenant_pool",
+            total_seconds_used: 0,
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 15000,
+            currency: "bdt",
+            duration_minutes: 1,
+            id: "pass_pool_01",
+            package_id: "starter-live",
+            payment_provider: "stripe",
+            room_id: "room_pool_01",
+            status: "paid",
+            tenant_id: "tenant_pool",
+          },
+        ],
+        [
+          {
+            access_token: "token_tenant_pool",
+            email: "pool@example.com",
+            id: "tenant_pool",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(403);
+    const payload = await response.json() as { message: string };
+    expect(payload.message).toContain("Time budget exhausted");
+  });
+
+  it("pauses and resumes an active room", async () => {
+    const responsePause = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_pause_01/pause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "token_tenant_pause" }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_pause_01",
+            is_paused: 0,
+            name: "Pause Room",
+            pin: "333333",
+            session_started_at: new Date(Date.now() - 60_000).toISOString(),
+            status: "active",
+            tenant_id: "tenant_pause",
+            total_seconds_used: 0,
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 15000,
+            currency: "bdt",
+            duration_minutes: 180,
+            id: "pass_pause_01",
+            package_id: "starter-live",
+            payment_provider: "stripe",
+            room_id: "room_pause_01",
+            status: "paid",
+            tenant_id: "tenant_pause",
+          },
+        ],
+        [
+          {
+            access_token: "token_tenant_pause",
+            email: "pause@example.com",
+            id: "tenant_pause",
+          },
+        ]
+      )
+    );
+
+    expect(responsePause.status).toBe(200);
+    const pausePayload = await responsePause.json() as { room: { is_paused: number } };
+    expect(pausePayload.room.is_paused).toBe(1);
+
+    const responseResume = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_pause_01/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "token_tenant_pause" }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_pause_01",
+            is_paused: 1,
+            name: "Pause Room",
+            pin: "333333",
+            session_started_at: new Date(Date.now() - 60_000).toISOString(),
+            status: "active",
+            tenant_id: "tenant_pause",
+            total_seconds_used: 60,
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 15000,
+            currency: "bdt",
+            duration_minutes: 180,
+            id: "pass_pause_01",
+            package_id: "starter-live",
+            payment_provider: "stripe",
+            room_id: "room_pause_01",
+            status: "paid",
+            tenant_id: "tenant_pause",
+          },
+        ],
+        [
+          {
+            access_token: "token_tenant_pause",
+            email: "pause@example.com",
+            id: "tenant_pause",
+          },
+        ]
+      )
+    );
+
+    expect(responseResume.status).toBe(200);
+    const resumePayload = await responseResume.json() as { room: { is_paused: number } };
+    expect(resumePayload.room.is_paused).toBe(0);
+  });
+
+  it("returns tenant time pool and room usage", async () => {
+    const response = await app.fetch(
+      new Request(
+        "https://example.com/api/v1/accounts/me/time-pool?access_token=token_tenant_pool",
+        { method: "GET" }
+      ),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_pool_a",
+            is_paused: 0,
+            name: "Room A",
+            pin: "444444",
+            session_started_at: new Date(Date.now() - 120_000).toISOString(),
+            status: "active",
+            tenant_id: "tenant_pool",
+            total_seconds_used: 0,
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 15000,
+            currency: "bdt",
+            duration_minutes: 180,
+            id: "pass_pool_a",
+            package_id: "starter-live",
+            payment_provider: "stripe",
+            room_id: "room_pool_a",
+            status: "paid",
+            tenant_id: "tenant_pool",
+          },
+        ],
+        [
+          {
+            access_token: "token_tenant_pool",
+            email: "pool@example.com",
+            id: "tenant_pool",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      data: {
+        pool: { totalMinutes: number; remainingMinutes: number };
+        rooms: Array<{ id: string; secondsUsed: number }>;
+      };
+    };
+    expect(payload.data.pool.totalMinutes).toBe(180);
+    expect(payload.data.pool.remainingMinutes).toBeLessThan(180);
+    expect(payload.data.rooms).toHaveLength(1);
+    expect(payload.data.rooms[0].secondsUsed).toBeGreaterThanOrEqual(120);
+  });
+
+  it("expires room and records seconds used when closed by director", async () => {
+    const response = await app.fetch(
+      new Request("https://example.com/api/v1/rooms/room_close_01/expire", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "token_tenant_close" }),
+      }),
+      createBindings(
+        {},
+        [
+          {
+            id: "room_close_01",
+            is_paused: 0,
+            name: "Close Room",
+            pin: "555555",
+            session_started_at: new Date(Date.now() - 90_000).toISOString(),
+            status: "active",
+            tenant_id: "tenant_close",
+            total_seconds_used: 0,
+          },
+        ],
+        [],
+        [
+          {
+            amount_cents: 15000,
+            currency: "bdt",
+            duration_minutes: 180,
+            id: "pass_close_01",
+            package_id: "starter-live",
+            payment_provider: "stripe",
+            room_id: "room_close_01",
+            status: "paid",
+            tenant_id: "tenant_close",
+          },
+        ],
+        [
+          {
+            access_token: "token_tenant_close",
+            email: "close@example.com",
+            id: "tenant_close",
+          },
+        ]
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { room: { total_seconds_used: number } };
+    expect(payload.room.total_seconds_used).toBeGreaterThanOrEqual(90);
   });
 });

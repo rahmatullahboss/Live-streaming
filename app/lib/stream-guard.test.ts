@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getProgramBadgeLabel, getStreamGuardState } from "./stream-guard";
+import { getProgramBadgeLabel, getRelayStatusText, getStreamGuardState } from "./stream-guard";
 
 describe("getProgramBadgeLabel", () => {
   it("keeps live output labels clean instead of exposing camera ids", () => {
@@ -32,5 +32,21 @@ describe("getStreamGuardState", () => {
       message: "This tab was backgrounded during the stream. Keep it foreground to avoid dropped frames.",
       title: "Stream quality at risk",
     });
+  });
+});
+
+describe("getRelayStatusText", () => {
+  it("shows idle setup guidance before a relay attempt starts", () => {
+    expect(getRelayStatusText("idle", null)).toBe("Waiting for Input");
+  });
+
+  it("surfaces the latest relay error instead of leaving the operator at waiting", () => {
+    expect(getRelayStatusText("idle", "Managed relay is not configured")).toBe(
+      "Managed relay is not configured"
+    );
+  });
+
+  it("shows the active streaming state", () => {
+    expect(getRelayStatusText("live", null)).toBe("Streaming Active");
   });
 });

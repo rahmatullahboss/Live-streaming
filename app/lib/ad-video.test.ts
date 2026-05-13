@@ -12,4 +12,20 @@ describe("getAdVideoUrlIssue", () => {
   it("accepts direct MP4 URLs", () => {
     expect(getAdVideoUrlIssue("https://cdn.example.com/ad.mp4")).toBeNull();
   });
+
+  it("accepts R2 asset URLs (our own storage)", () => {
+    expect(getAdVideoUrlIssue("https://example.com/api/v1/assets/abc-123")).toBeNull();
+  });
+
+  it("rejects non-direct video URLs", () => {
+    expect(getAdVideoUrlIssue("https://example.com/page.html")).toContain("direct video file");
+  });
+
+  it("rejects invalid URLs", () => {
+    expect(getAdVideoUrlIssue("not-a-url")).toContain("valid absolute URL");
+  });
+
+  it("returns null for empty input", () => {
+    expect(getAdVideoUrlIssue("   ")).toBeNull();
+  });
 });

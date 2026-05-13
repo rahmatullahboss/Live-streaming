@@ -3,8 +3,14 @@ import { Link } from "react-router";
 import {
   ArrowDown,
   ArrowUp,
+  AlertTriangle,
   CheckCircle2,
+  CreditCard,
+  FileText,
+  LayoutDashboard,
   Loader2,
+  MonitorPlay,
+  Package,
   Play,
   RefreshCcw,
   Save,
@@ -23,8 +29,10 @@ import {
   loginAdmin,
   logoutAdmin,
   rejectAdminRoomPass,
+  updateAdminPackage,
   type AdminDashboard,
   type AdminAuditLog,
+  type AdminReadiness,
   type RoomPassSummary,
   type RoomSummary,
   type StreamingPackage,
@@ -52,10 +60,10 @@ type AuditLogFilter = {
 
 export function meta(_: Route.MetaArgs) {
   return [
-    { title: "Admin | Kinetic Command" },
+    { title: "অ্যাডমিন | কাইনেটিক কমান্ড" },
     {
       name: "description",
-      content: "Admin operations panel for packages, tenants, rooms, and payments.",
+      content: "প্যাকেজ, টেন্যান্ট, রুম এবং পেমেন্ট ম্যানেজমেন্ট অ্যাডমিন প্যানেল।",
     },
   ];
 }
@@ -67,6 +75,8 @@ export default function AdminRoute() {
   const [dashboard, setDashboard] = useState<AdminDashboard | null>(null);
   const [loading, setLoading] = useState(false);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
+  const [savingPackageId, setSavingPackageId] = useState<string | null>(null);
+  const [adminTab, setAdminTab] = useState<string>("overview");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [auditLogFilter, setAuditLogFilter] = useState<AuditLogFilter>({
@@ -216,6 +226,33 @@ export default function AdminRoute() {
     }
   }
 
+  async function handleSavePackage(packageId: string, draft: PackageDraft) {
+    setSavingPackageId(packageId);
+    setError(null);
+    setNotice(null);
+
+    try {
+      await updateAdminPackage(packageId, {
+        active: draft.active ? 1 : 0,
+        description: draft.description,
+        duration_minutes: parsePositiveInteger(draft.durationMinutes, 180),
+        features: draft.featuresText.split("\n").filter((line) => line.trim()),
+        max_ad_videos: parseNonNegativeInteger(draft.maxAdVideos, 3),
+        max_cameras: parsePositiveInteger(draft.maxCameras, 3),
+        max_rooms: parsePositiveInteger(draft.maxRooms, 1),
+        name: draft.name,
+        price_cents: parseNonNegativeInteger(draft.priceCents, 0),
+        sort_order: parseNonNegativeInteger(draft.sortOrder, 100),
+      });
+      setNotice(`Package "${draft.name || packageId}" updated.`);
+      await loadDashboard({ clearNotice: false });
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save package");
+    } finally {
+      setSavingPackageId(null);
+    }
+  }
+
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const email = adminEmail.trim().toLowerCase();
@@ -297,17 +334,17 @@ export default function AdminRoute() {
         <div>
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--accent-cyan)]/25 bg-[var(--accent-cyan)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent-cyan)]">
             <Shield size={14} />
-            Admin operations
+            অ্যাডমিন অপারেশন
           </div>
           <h1 data-display className="text-3xl font-bold text-[var(--text-main)] sm:text-4xl">
-            Operations
+            অপারেশন
           </h1>
         </div>
         <Link
           to="/"
           className="rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-semibold text-[var(--text-main)]"
         >
-          Home
+          হোম
         </Link>
       </header>
 
@@ -316,7 +353,7 @@ export default function AdminRoute() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                Signed in as
+                লগইন করা আছে
               </p>
               <p className="mt-1 font-semibold text-[var(--text-main)]">{authenticatedEmail}</p>
             </div>
@@ -328,7 +365,7 @@ export default function AdminRoute() {
                 className="flex items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-5 py-3 text-sm font-semibold text-[#041016] disabled:opacity-60"
               >
                 {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCcw size={16} />}
-                Refresh
+                রিফ্রেশ
               </button>
               <button
                 type="button"
@@ -336,7 +373,7 @@ export default function AdminRoute() {
                 disabled={loading}
                 className="rounded-full border border-[var(--border-soft)] px-5 py-3 text-sm font-semibold text-[var(--text-main)] disabled:opacity-60"
               >
-                Sign out
+                লগআউট
               </button>
             </div>
           </div>
@@ -344,7 +381,7 @@ export default function AdminRoute() {
           <form onSubmit={handleLogin} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                Admin email
+                অ্যাডমিন ইমেইল
               </span>
               <input
                 type="email"
@@ -357,14 +394,14 @@ export default function AdminRoute() {
             </label>
             <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                Password
+                পাসওয়ার্ড
               </span>
               <input
                 type="password"
                 value={adminPassword}
                 onChange={(event) => setAdminPassword(event.target.value)}
                 className="w-full rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-3 text-sm text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
-                placeholder="Admin password"
+                placeholder="অ্যাডমিন পাসওয়ার্ড"
                 autoComplete="current-password"
               />
             </label>
@@ -374,7 +411,7 @@ export default function AdminRoute() {
               className="flex items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-5 py-3 text-sm font-semibold text-[#041016] disabled:opacity-60 md:self-end"
             >
               {loading ? <Loader2 className="animate-spin" size={16} /> : <Shield size={16} />}
-              Sign in
+              লগইন
             </button>
           </form>
         )}
@@ -390,220 +427,253 @@ export default function AdminRoute() {
       </section>
 
       {loading && !dashboard ? (
-        <StatePanel icon={<Loader2 className="animate-spin text-[var(--accent-cyan)]" size={28} />} text="Loading admin data..." />
+        <StatePanel icon={<Loader2 className="animate-spin text-[var(--accent-cyan)]" size={28} />} text="অ্যাডমিন ডাটা লোড হচ্ছে..." />
       ) : !dashboard ? (
-        <StatePanel icon={<ShieldAlert className="text-[var(--accent-coral)]" size={28} />} text="Sign in with the admin email and password to load operations data." />
+        <StatePanel icon={<ShieldAlert className="text-[var(--accent-coral)]" size={28} />} text="অপারেশন ডাটা দেখার জন্য অ্যাডমিন ইমেইল এবং পাসওয়ার্ড দিয়ে লগইন করুন।" />
       ) : (
         <div className="space-y-5">
-          {/* Revenue Panel */}
-          <Panel title="Revenue">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <RevenueMetric
-                label="MRR"
-                valueCents={revenueStats.mrrCents}
-                subtitle="Monthly Recurring Revenue"
-              />
-              <RevenueMetric
-                label="ARR"
-                valueCents={revenueStats.arrCents}
-                subtitle="Annual Run Rate"
-              />
-              <RevenueMetric
-                label="Total Revenue"
-                valueCents={revenueStats.totalRevenueCents}
-                subtitle="All time"
-              />
-              <div className="rounded-[1.25rem] border border-[var(--border-soft)] bg-black/15 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                  Payment Methods
-                </p>
-                <div className="mt-3 space-y-2">
-                  {Object.keys(revenueStats.paymentMethodBreakdown).length === 0 ? (
-                    <p className="text-sm text-[var(--text-muted)]">No payments yet</p>
-                  ) : (
-                    Object.entries(revenueStats.paymentMethodBreakdown).map(([method, cents]) => (
-                      <div key={method} className="flex justify-between text-sm">
-                        <span className="capitalize text-[var(--text-main)]">{method}</span>
-                        <span className="font-semibold text-[var(--text-main)]">
-                          {formatBDT(cents)}
-                        </span>
-                      </div>
-                    ))
-                  )}
+          <AdminTabBar active={adminTab} onChange={setAdminTab} />
+
+          {/* ── Overview ── */}
+          {adminTab === "overview" && (
+            <>
+              <Panel title="রাজস্ব">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <RevenueMetric label="MRR" valueCents={revenueStats.mrrCents} subtitle="মাসিক সম্ভাব্য আয়" />
+                  <RevenueMetric label="ARR" valueCents={revenueStats.arrCents} subtitle="বার্ষিক সম্ভাব্য আয়" />
+                  <RevenueMetric label="মোট রাজস্ব" valueCents={revenueStats.totalRevenueCents} subtitle="সর্বকালীন" />
+                  <div className="rounded-[1.25rem] border border-[var(--border-soft)] bg-black/15 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                      পেমেন্ট মাধ্যম
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      {Object.keys(revenueStats.paymentMethodBreakdown).length === 0 ? (
+                        <p className="text-sm text-[var(--text-muted)]">কোনো পেমেন্ট নেই</p>
+                      ) : (
+                        Object.entries(revenueStats.paymentMethodBreakdown).map(([method, cents]) => (
+                          <div key={method} className="flex justify-between text-sm">
+                            <span className="capitalize text-[var(--text-main)]">{method}</span>
+                            <span className="font-semibold text-[var(--text-main)]">{formatBDT(cents)}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </Panel>
+              </Panel>
 
-          {/* Trending Metrics Row */}
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <Metric label="Tenants" value={String(dashboard.summary.tenants)} />
-            <Metric label="Rooms" value={String(dashboard.summary.rooms)} />
-            <TrendingMetric
-              label="Active rooms"
-              value={dashboard.summary.activeRooms}
-              change={trendingMetrics?.activeRoomsChange ?? 0}
-            />
-            <Metric label="Pending review" value={String(dashboard.summary.pendingManualReviews)} />
-            <TrendingMetric
-              label="Paid purchases"
-              value={dashboard.summary.paidPurchases}
-              change={trendingMetrics?.paidPurchasesChange ?? 0}
-            />
-          </section>
+              <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <Metric label="টেন্যান্ট" value={String(dashboard.summary.tenants)} />
+                <Metric label="রুম" value={String(dashboard.summary.rooms)} />
+                <TrendingMetric
+                  label="সক্রিয় রুম"
+                  value={dashboard.summary.activeRooms}
+                  change={trendingMetrics?.activeRoomsChange ?? 0}
+                />
+                <Metric label="রিভিউ অপেক্ষমান" value={String(dashboard.summary.pendingManualReviews)} />
+                <TrendingMetric
+                  label="পেইড পারচেজ"
+                  value={dashboard.summary.paidPurchases}
+                  change={trendingMetrics?.paidPurchasesChange ?? 0}
+                />
+              </section>
 
-          <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_420px]">
-            <div className="space-y-5">
-              {/* Streaming Stats Panel */}
-              <Panel title="Streaming Stats">
+              <Panel title="স্ট্রিমিং পরিসংখ্যান">
                 {streamingStats.totalStreams === 0 ? (
                   <div className="flex items-center justify-between rounded-[1.25rem] border border-dashed border-[var(--border-soft)] px-4 py-6 text-sm text-[var(--text-muted)]">
-                    <span>Streaming analytics coming soon</span>
+                    <span>স্ট্রিমিং অ্যানালিটিক্স শীঘ্রই আসছে</span>
                     <TrendingUp size={16} className="text-[var(--accent-cyan)]" />
                   </div>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <StreamingStatItem
-                      label="Total streams"
-                      value={streamingStats.totalStreams}
+                    <StreamingStatItem label="মোট স্ট্রিম" value={streamingStats.totalStreams} />
+                    <StreamingStatItem label="গড় স্থায়িত্ব" value={`${streamingStats.avgDurationMinutes}m`} />
+                    <StreamingStatItem label="সর্বোচ্চ ক্যামেরা" value={streamingStats.peakConcurrentCameras} />
+                  </div>
+                )}
+              </Panel>
+            </>
+          )}
+
+          {/* ── Packages ── */}
+          {adminTab === "packages" && (
+            <Panel title="প্যাকেজ">
+              {dashboard.packages.length === 0 ? (
+                <EmptyState text="এখনও কোনো প্যাকেজ কনফিগার করা হয়নি।" />
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {dashboard.packages.map((item) => (
+                    <PackageEditor
+                      key={item.id}
+                      item={item}
+                      saving={savingPackageId === item.id}
+                      onSave={(draft) => handleSavePackage(item.id, draft)}
                     />
-                    <StreamingStatItem
-                      label="Avg duration"
-                      value={`${streamingStats.avgDurationMinutes}m`}
-                    />
-                    <StreamingStatItem
-                      label="Peak cameras"
-                      value={streamingStats.peakConcurrentCameras}
-                    />
-                  </div>
-                )}
-              </Panel>
-
-              <Panel title="Manual payment queue">
-                {pendingPasses.length === 0 ? (
-                  <EmptyState text="No manual payments are waiting for review." />
-                ) : (
-                  <div className="space-y-3">
-                    {pendingPasses.map((pass) => (
-                      <PaymentCard
-                        key={pass.id}
-                        pass={pass}
-                        mutating={mutatingId === pass.id}
-                        onApprove={() => void handleApprove(pass.id)}
-                        onReject={() => void handleReject(pass.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </Panel>
-
-              <Panel title="Rooms">
-                {dashboard.rooms.length === 0 ? (
-                  <EmptyState text="No rooms have been created yet." />
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[820px] text-left text-sm">
-                      <thead className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                        <tr>
-                          <th className="px-3 py-2">Room</th>
-                          <th className="px-3 py-2">PIN</th>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2">Tenant</th>
-                          <th className="px-3 py-2">Expires</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dashboard.rooms.map((room) => (
-                          <RoomRow
-                            key={room.id}
-                            room={room}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </Panel>
-            </div>
-
-            <aside className="space-y-5">
-              <Panel title="Packages">
-                {dashboard.packages.length === 0 ? (
-                  <EmptyState text="No packages are configured yet." />
-                ) : (
-                  <div className="space-y-3">
-                    {dashboard.packages.map((item) => (
-                      <PackageEditor
-                        key={item.id}
-                        item={item}
-                        onSave={() => {}}
-                      />
-                    ))}
-                  </div>
-                )}
-              </Panel>
-
-              <Panel title="Recent admin actions">
-                <div className="mb-4 flex flex-wrap gap-2">
-                  <select
-                    value={auditLogFilter.actionType}
-                    onChange={(e) => setAuditLogFilter((f) => ({ ...f, actionType: e.target.value }))}
-                    className="rounded-full border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
-                  >
-                    <option value="all">All actions</option>
-                    <option value="approve">Approve</option>
-                    <option value="reject">Reject</option>
-                    <option value="create">Create</option>
-                    <option value="update">Update</option>
-                    <option value="delete">Delete</option>
-                  </select>
-                  <select
-                    value={auditLogFilter.dateRange}
-                    onChange={(e) => setAuditLogFilter((f) => ({ ...f, dateRange: e.target.value }))}
-                    className="rounded-full border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
-                  >
-                    <option value="all">All time</option>
-                    <option value="today">Today</option>
-                    <option value="7days">Last 7 days</option>
-                    <option value="30days">Last 30 days</option>
-                  </select>
+                  ))}
                 </div>
-                {filteredAuditLogs.length === 0 ? (
-                  <EmptyState text="No admin actions match the filter." />
-                ) : (
-                  <div className="space-y-3">
-                    {filteredAuditLogs.map((item) => (
-                      <AuditLogItem key={item.id} item={item} />
-                    ))}
-                  </div>
-                )}
-              </Panel>
+              )}
+            </Panel>
+          )}
 
-              <Panel title="Tenants">
-                {dashboard.tenants.length === 0 ? (
-                  <EmptyState text="No tenant accounts yet." />
-                ) : (
-                  <div className="space-y-3">
-                    {dashboard.tenants.map((tenant) => (
-                      <div key={tenant.id} className="flex items-start gap-3 rounded-[1.15rem] border border-[var(--border-soft)] bg-black/15 p-4">
-                        <div className="rounded-full bg-[var(--accent-cyan)]/12 p-2 text-[var(--accent-cyan)]">
-                          <Users size={16} />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-[var(--text-main)]">{tenant.name}</p>
-                          <p className="mt-1 truncate text-xs text-[var(--text-muted)]">{tenant.email}</p>
-                          <p className="mt-1 text-xs text-[var(--text-muted)]">{tenant.authProvider ?? "email"}</p>
-                        </div>
+          {/* ── Payments ── */}
+          {adminTab === "payments" && (
+            <Panel title="ম্যানুয়াল পেমেন্ট কিউ">
+              {pendingPasses.length === 0 ? (
+                <EmptyState text="কোনো ম্যানুয়াল পেমেন্ট রিভিউ অপেক্ষমান নেই।" />
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {pendingPasses.map((pass) => (
+                    <PaymentCard
+                      key={pass.id}
+                      pass={pass}
+                      mutating={mutatingId === pass.id}
+                      onApprove={() => void handleApprove(pass.id)}
+                      onReject={() => void handleReject(pass.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </Panel>
+          )}
+
+          {/* ── Rooms ── */}
+          {adminTab === "rooms" && (
+            <Panel title="রুম">
+              {dashboard.rooms.length === 0 ? (
+                <EmptyState text="এখনও কোনো রুম তৈরি করা হয়নি।" />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[820px] text-left text-sm">
+                    <thead className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                      <tr>
+                        <th className="px-3 py-2">রুম</th>
+                        <th className="px-3 py-2">পিন (PIN)</th>
+                        <th className="px-3 py-2">স্ট্যাটাস</th>
+                        <th className="px-3 py-2">টেন্যান্ট</th>
+                        <th className="px-3 py-2">মেয়াদ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboard.rooms.map((room) => (
+                        <RoomRow key={room.id} room={room} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+          )}
+
+          {/* ── Audit Log ── */}
+          {adminTab === "audit" && (
+            <Panel title="সাম্প্রতিক অ্যাডমিন অ্যাকশন">
+              <div className="mb-4 flex flex-wrap gap-2">
+                <select
+                  value={auditLogFilter.actionType}
+                  onChange={(e) => setAuditLogFilter((f) => ({ ...f, actionType: e.target.value }))}
+                  className="rounded-full border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
+                >
+                  <option value="all">সকল অ্যাকশন</option>
+                  <option value="approve">অনুমোদন</option>
+                  <option value="reject">প্রত্যাখ্যান</option>
+                  <option value="create">তৈরি</option>
+                  <option value="update">আপডেট</option>
+                  <option value="delete">ডিলিট</option>
+                </select>
+                <select
+                  value={auditLogFilter.dateRange}
+                  onChange={(e) => setAuditLogFilter((f) => ({ ...f, dateRange: e.target.value }))}
+                  className="rounded-full border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
+                >
+                  <option value="all">সর্বকালীন</option>
+                  <option value="today">আজ</option>
+                  <option value="7days">গত ৭ দিন</option>
+                  <option value="30days">গত ৩০ দিন</option>
+                </select>
+              </div>
+              {filteredAuditLogs.length === 0 ? (
+                <EmptyState text="ফিল্টারের সাথে কোনো অ্যাকশন মেলেনি।" />
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {filteredAuditLogs.map((item) => (
+                    <AuditLogItem key={item.id} item={item} />
+                  ))}
+                </div>
+              )}
+            </Panel>
+          )}
+
+          {/* ── Tenants ── */}
+          {adminTab === "tenants" && (
+            <Panel title="টেন্যান্ট">
+              {dashboard.tenants.length === 0 ? (
+                <EmptyState text="এখনও কোনো টেন্যান্ট অ্যাকাউন্ট নেই।" />
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {dashboard.tenants.map((tenant) => (
+                    <div key={tenant.id} className="flex items-start gap-3 rounded-[1.15rem] border border-[var(--border-soft)] bg-black/15 p-4">
+                      <div className="rounded-full bg-[var(--accent-cyan)]/12 p-2 text-[var(--accent-cyan)]">
+                        <Users size={16} />
                       </div>
-                    ))}
-                  </div>
-                )}
-              </Panel>
-            </aside>
-          </section>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-[var(--text-main)]">{tenant.name}</p>
+                        <p className="mt-1 truncate text-xs text-[var(--text-muted)]">{tenant.email}</p>
+                        <p className="mt-1 text-xs text-[var(--text-muted)]">{tenant.authProvider ?? "ইমেইল"}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+          )}
         </div>
       )}
     </main>
+  );
+}
+
+type AdminTab = {
+  id: string;
+  label: string;
+  icon: ReactNode;
+};
+
+const ADMIN_TABS: AdminTab[] = [
+  { id: "overview", label: "সারসংক্ষেপ", icon: <LayoutDashboard size={16} /> },
+  { id: "packages", label: "প্যাকেজ", icon: <Package size={16} /> },
+  { id: "payments", label: "পেমেন্ট", icon: <CreditCard size={16} /> },
+  { id: "rooms", label: "রুম", icon: <MonitorPlay size={16} /> },
+  { id: "audit", label: "অডিট লগ", icon: <FileText size={16} /> },
+  { id: "tenants", label: "টেন্যান্ট", icon: <Users size={16} /> },
+];
+
+function AdminTabBar({
+  active,
+  onChange,
+}: {
+  active: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <nav className="overflow-x-auto rounded-[1.25rem] border border-[var(--border-soft)] bg-black/15 p-1.5">
+      <div className="flex min-w-max gap-1">
+        {ADMIN_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-2.5 text-xs font-semibold transition-colors ${
+              active === tab.id
+                ? "bg-[var(--accent-cyan)] text-[#041016]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    </nav>
   );
 }
 
@@ -713,7 +783,7 @@ function PaymentCard({
             className="flex items-center gap-2 rounded-full bg-[var(--accent-lime)] px-4 py-2 text-xs font-semibold text-[#041016] disabled:opacity-60"
           >
             {mutating ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
-            Approve
+            অনুমোদন
           </button>
           <button
             type="button"
@@ -722,7 +792,7 @@ function PaymentCard({
             className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold text-[var(--text-main)] disabled:opacity-60"
           >
             <XCircle size={14} />
-            Reject
+            প্রত্যাখ্যান
           </button>
         </div>
       </div>
@@ -734,7 +804,7 @@ function ReadinessPanel({ readiness }: { readiness: AdminReadiness }) {
   const failingChecks = readiness.checks.filter((check) => !check.ok);
 
   return (
-    <Panel title="Production readiness">
+    <Panel title="প্রোডাকশন রেডিনেস">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div
@@ -748,10 +818,10 @@ function ReadinessPanel({ readiness }: { readiness: AdminReadiness }) {
           </div>
           <div>
             <p className="font-semibold text-[var(--text-main)]">
-              {readiness.ready ? "Ready for production traffic" : `${failingChecks.length} production checks need attention`}
+              {readiness.ready ? "প্রোডাকশন ট্রাফিকের জন্য প্রস্তুত" : `${failingChecks.length}টি প্রোডাকশন চেক মনোযোগ প্রয়োজন`}
             </p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Secrets, migrations, payment, storage, relay, and tenant login checks.
+              সিক্রেট, মাইগ্রেশন, পেমেন্ট, স্টোরেজ, রিলে এবং টেন্যান্ট লগইন চেক।
             </p>
           </div>
         </div>
@@ -773,7 +843,7 @@ function ReadinessPanel({ readiness }: { readiness: AdminReadiness }) {
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[var(--text-main)]">{check.label}</p>
                 <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                  {check.ok ? "Configured" : check.action}
+                  {check.ok ? "কনফিগার করা আছে" : check.action}
                 </p>
               </div>
             </div>
@@ -797,7 +867,7 @@ function AuditLogItem({ item }: { item: AdminAuditLog }) {
           </p>
         </div>
         <span className="shrink-0 text-right text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
-          {item.created_at ? new Date(item.created_at).toLocaleString() : "just now"}
+          {item.created_at ? new Date(item.created_at).toLocaleString() : "এইমাত্র"}
         </span>
       </div>
       <p className="mt-2 truncate text-xs text-[var(--text-muted)]">
@@ -855,9 +925,11 @@ function parseNonNegativeInteger(value: string, fallback: number): number {
 function PackageEditor({
   item,
   onSave,
+  saving,
 }: {
   item: StreamingPackage;
-  onSave: () => void;
+  onSave: (draft: PackageDraft) => void;
+  saving: boolean;
 }) {
   const [draft, setDraft] = useState<PackageDraft>(() => createPackageDraft(item));
 
@@ -867,7 +939,7 @@ function PackageEditor({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSave();
+    onSave(draft);
   }
 
   return (
@@ -886,19 +958,19 @@ function PackageEditor({
             onChange={(event) => updateDraft("active", event.target.checked)}
             className="h-4 w-4 accent-[var(--accent-lime)]"
           />
-          {draft.active ? "Public" : "Hidden"}
+          {draft.active ? "প্রকাশিত" : "লুকানো"}
         </label>
       </div>
 
       <div className="grid gap-3">
         <TextField
-          label="Package name"
+          label="প্যাকেজের নাম"
           value={draft.name}
           onChange={(value) => updateDraft("name", value)}
         />
         <label className="block">
           <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            Description
+            বিবরণ
           </span>
           <textarea
             value={draft.description}
@@ -910,44 +982,44 @@ function PackageEditor({
         <div className="grid gap-3 sm:grid-cols-2">
           <TextField
             inputMode="numeric"
-            label="Price cents"
+            label="মূল্য (পয়সা)"
             value={draft.priceCents}
             onChange={(value) => updateDraft("priceCents", value)}
           />
           <TextField
             inputMode="numeric"
-            label="Duration minutes"
+            label="স্থায়িত্ব (মিনিট)"
             value={draft.durationMinutes}
             onChange={(value) => updateDraft("durationMinutes", value)}
           />
           <TextField
             inputMode="numeric"
-            label="Max rooms"
+            label="সর্বোচ্চ রুম"
             value={draft.maxRooms}
             onChange={(value) => updateDraft("maxRooms", value)}
           />
           <TextField
             inputMode="numeric"
-            label="Max cameras"
+            label="সর্বোচ্চ ক্যামেরা"
             value={draft.maxCameras}
             onChange={(value) => updateDraft("maxCameras", value)}
           />
           <TextField
             inputMode="numeric"
-            label="Max ad videos"
+            label="সর্বোচ্চ অ্যাড ভিডিও"
             value={draft.maxAdVideos}
             onChange={(value) => updateDraft("maxAdVideos", value)}
           />
           <TextField
             inputMode="numeric"
-            label="Sort order"
+            label="ক্রমিক নম্বর"
             value={draft.sortOrder}
             onChange={(value) => updateDraft("sortOrder", value)}
           />
         </div>
         <label className="block">
           <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            Features
+            বৈশিষ্ট্যসমূহ
           </span>
           <textarea
             value={draft.featuresText}
@@ -960,10 +1032,11 @@ function PackageEditor({
 
       <button
         type="submit"
+        disabled={saving}
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-4 py-3 text-sm font-semibold text-[#041016] disabled:opacity-60"
       >
-        <Save size={16} />
-        Save package
+        {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+        {saving ? "সেভ হচ্ছে..." : "প্যাকেজ সেভ করুন"}
       </button>
     </form>
   );
@@ -1016,24 +1089,34 @@ function RoomRow({ room }: { room: RoomSummary }) {
 
 function getRoomAccessStatus(room: RoomSummary): string {
   if (room.status === "active" && room.expires_at && new Date(room.expires_at).getTime() <= Date.now()) {
-    return "expired";
+    return "মেয়াদোত্তীর্ণ";
   }
 
-  return room.status ?? "active";
+  const statusMap: Record<string, string> = {
+    active: "সক্রিয়",
+    pending: "অপেক্ষমান",
+    expired: "মেয়াদোত্তীর্ণ",
+    suspended: "স্থগিত",
+  };
+
+  return statusMap[room.status ?? ""] ?? (room.status ?? "সক্রিয়");
 }
 
-function getStatusClassName(status: string): string {
+export function getStatusClassName(status: string): string {
   const base = "rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]";
-  if (status === "active") {
+  const lower = status.toLowerCase();
+  
+  if (lower === "সক্রিয়" || lower === "active" || lower === "ready" || lower === "paid") {
     return `${base} bg-[var(--accent-lime)]/15 text-[var(--accent-lime)]`;
   }
-  if (status === "ready") {
-    return `${base} bg-[var(--accent-cyan)]/15 text-[var(--accent-cyan)]`;
-  }
-  if (status === "expired" || status === "cancelled") {
+  if (lower === "মেয়াদোত্তীর্ণ" || lower === "expired" || lower === "cancelled" || lower === "deleted" || lower === "failed") {
     return `${base} bg-[var(--accent-coral)]/15 text-[#ffd8d4]`;
   }
-  return `${base} bg-white/8 text-white/60`;
+  if (lower === "পেন্ডিং" || lower === "pending" || lower === "pending_manual_review") {
+    return `${base} bg-[var(--accent-cyan)]/15 text-[var(--accent-cyan)]`;
+  }
+  
+  return `${base} bg-white/10 text-white/60 border-white/20`;
 }
 
 function Panel({ children, title }: { children: ReactNode; title: string }) {

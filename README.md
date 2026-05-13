@@ -141,8 +141,8 @@ Relay diagnostics are available on the VPS at `http://127.0.0.1:8899/status`.
 
 Then in the director panel:
 
-1. Open `/studio`
-2. Sign in on the home page first, then join the room with the PIN
+1. Sign in on the home page first
+2. Open the room's `Studio` button from the dashboard
 3. Open `/camera` on one or more phones and join with the same PIN
 4. Switch a ready camera to live, update graphics, or switch to ad mode
 5. Paste the YouTube or Facebook RTMP URL and stream key

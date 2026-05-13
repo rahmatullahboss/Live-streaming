@@ -8,6 +8,7 @@ type ApiEnvelope<T> = {
 export type RoomSummary = {
   checkout_session_id?: string | null;
   id: string;
+  is_paused?: number | null;
   name: string;
   pin: string;
   created_at?: string;
@@ -20,6 +21,7 @@ export type RoomSummary = {
   status?: string | null;
   stream_playback_url?: string | null;
   tenant_id?: string | null;
+  total_seconds_used?: number | null;
   youtube_output_url?: string | null;
   youtube_stream_key?: string | null;
 };
@@ -48,6 +50,7 @@ export type RoomPassSummary = {
   duration_minutes: number;
   id: string;
   package_id?: string | null;
+  paid_at?: string | null;
   payment_provider?: string | null;
   room_id: string;
   status: string;
@@ -157,7 +160,7 @@ export type AdminLoginResult = {
 
 export type RoomAssetResult = {
   asset: {
-    field: "left_logo_url" | "right_logo_url" | "ad_video_url";
+    field: "left_logo_url" | "right_logo_url" | "team1_logo_url" | "team2_logo_url" | "ad_video_url";
     id: string;
     publicUrl: string;
     r2Key: string;
@@ -186,6 +189,7 @@ export type OverlayConfig = {
   ad_title?: string | null;
   ad_video_url?: string | null;
   clock_text?: string | null;
+  external_overlay_active: number;
   external_scoreboard_url?: string | null;
   left_logo_url?: string | null;
   logo_url?: string | null;
@@ -196,13 +200,16 @@ export type OverlayConfig = {
   scoring_data?: Record<string, number | string>;
   sponsor_text?: string | null;
   sport?: "cricket" | "football" | "generic";
+  team1_logo_url?: string | null;
   team1_name: string;
   team1_score: number;
+  team2_logo_url?: string | null;
   team2_name: string;
   team2_score: number;
   theme_variant?: "arena" | "broadcast" | "classic";
   ticker_active?: number;
   ticker_text?: string | null;
+  updated_at?: number | null;
 };
 
 export async function readApi<T>(response: Response): Promise<T> {
@@ -227,7 +234,7 @@ export async function verifyRoomPin(pin: string): Promise<RoomSummary> {
 
 export async function verifyDirectorAccess(input: {
   accessToken: string;
-  pin: string;
+  roomId: string;
 }): Promise<RoomSummary> {
   const response = await fetch("/api/v1/director-access", {
     method: "POST",
@@ -411,12 +418,129 @@ export async function startRoomSession(roomId: string, accessToken: string): Pro
   return payload.room;
 }
 
+export async function expireRoomSession(roomId: string, accessToken: string): Promise<RoomSummary> {
+  const response = await fetch(`/api/v1/rooms/${roomId}/expire`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken }),
+  });
+  const payload = await readApi<{ room: RoomSummary }>(response);
+  return payload.room;
+}
+
+export async function pauseRoomSession(roomId: string, accessToken: string): Promise<RoomSummary> {
+  const response = await fetch(`/api/v1/rooms/${roomId}/pause`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken }),
+  });
+  const payload = await readApi<{ room: RoomSummary }>(response);
+  return payload.room;
+}
+
+export async function resumeRoomSession(roomId: string, accessToken: string): Promise<RoomSummary> {
+  const response = await fetch(`/api/v1/rooms/${roomId}/resume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken }),
+  });
+  const payload = await readApi<{ room: RoomSummary }>(response);
+  return payload.room;
+}
+
+export async function stopRoomSession(roomId: string, accessToken: string): Promise<RoomSummary> {
+  const response = await fetch(`/api/v1/rooms/${roomId}/stop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken }),
+  });
+  const payload = await readApi<{ room: RoomSummary }>(response);
+  return payload.room;
+}
+
+export type TimePoolRoom = {
+  expiresAt?: string | null;
+  id: string;
+  isPaused: boolean;
+  name: string;
+  secondsUsed: number;
+  status?: string | null;
+};
+
+export type TimePool = {
+  remainingMinutes: number;
+  remainingSeconds: number;
+  totalMinutes: number;
+  totalSeconds: number;
+  usedMinutes: number;
+  usedSeconds: number;
+};
+
+export async function getTimePool(accessToken: string): Promise<{ pool: TimePool; rooms: TimePoolRoom[] }> {
+  const response = await fetch(`/api/v1/accounts/me/time-pool?access_token=${encodeURIComponent(accessToken)}`);
+  return readApi<{ pool: TimePool; rooms: TimePoolRoom[] }>(response);
+}
+
+export type Entitlements = {
+  entitlements: {
+    totalMinutes: number;
+    usedSeconds: number;
+    remainingSeconds: number;
+    maxRooms: number;
+    activeRooms: number;
+    availableRooms: number;
+  };
+  purchases: Array<{
+    id: string;
+    packageName: string;
+    amountCents: number;
+    currency: string;
+    durationMinutes: number;
+    maxRooms: number;
+    maxCameras: number;
+    maxAdVideos: number;
+    status: string;
+    paidAt: string | null;
+  }>;
+  rooms: Array<{
+    id: string;
+    name: string;
+    status: string;
+    isPaused: boolean;
+    totalSecondsUsed: number | null;
+    sessionStartedAt: string | null;
+  }>;
+};
+
+export async function getEntitlements(accessToken: string): Promise<Entitlements> {
+  const response = await fetch(`/api/v1/accounts/me/entitlements?access_token=${encodeURIComponent(accessToken)}`);
+  return readApi<Entitlements>(response);
+}
+
+export async function createRoom(accessToken: string, name: string): Promise<{ room: RoomSummary }> {
+  const response = await fetch("/api/v1/rooms", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken, name }),
+  });
+  return readApi<{ room: RoomSummary }>(response);
+}
+
+const MULTIPART_THRESHOLD_BYTES = 90_000_000; // 90MB — use multipart for files above this
+const MULTIPART_PART_SIZE_BYTES = 90_000_000; // Each chunk sent to the Worker
+
 export async function uploadRoomAsset(input: {
-  field: "left_logo_url" | "right_logo_url" | "ad_video_url";
+  field: "left_logo_url" | "right_logo_url" | "team1_logo_url" | "team2_logo_url" | "ad_video_url";
   file: Blob;
   filename: string;
+  onProgress?: (percent: number) => void;
   roomId: string;
 }): Promise<RoomAssetResult> {
+  // Large ad videos → multipart upload to avoid Cloudflare Workers 100MB body limit
+  if (input.field === "ad_video_url" && input.file.size > MULTIPART_THRESHOLD_BYTES) {
+    return uploadRoomAssetMultipart(input);
+  }
+
   const formData = new FormData();
   formData.set("field", input.field);
   formData.set("file", input.file, input.filename);
@@ -427,6 +551,76 @@ export async function uploadRoomAsset(input: {
   });
 
   return readApi<RoomAssetResult>(response);
+}
+
+async function uploadRoomAssetMultipart(input: {
+  field: "left_logo_url" | "right_logo_url" | "team1_logo_url" | "team2_logo_url" | "ad_video_url";
+  file: Blob;
+  filename: string;
+  onProgress?: (percent: number) => void;
+  roomId: string;
+}): Promise<RoomAssetResult> {
+  // Step 1: Prepare multipart upload
+  const prepareResponse = await fetch(`/api/v1/rooms/${input.roomId}/assets/multipart/prepare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contentType: input.file.type || "video/mp4",
+      field: input.field,
+      fileSize: input.file.size,
+      filename: input.filename,
+    }),
+  });
+
+  const prepareResult = await readApi<{
+    assetId: string;
+    contentType: string;
+    r2Key: string;
+    uploadId: string;
+  }>(prepareResponse);
+
+  // Step 2: Upload parts
+  const parts: Array<{ etag: string; partNumber: number }> = [];
+  const totalParts = Math.ceil(input.file.size / MULTIPART_PART_SIZE_BYTES);
+
+  for (let i = 0; i < totalParts; i++) {
+    const start = i * MULTIPART_PART_SIZE_BYTES;
+    const end = Math.min(start + MULTIPART_PART_SIZE_BYTES, input.file.size);
+    const chunk = input.file.slice(start, end);
+    const partNumber = i + 1;
+
+    const partResponse = await fetch(
+      `/api/v1/rooms/${input.roomId}/assets/multipart/${prepareResult.uploadId}/parts/${partNumber}?key=${encodeURIComponent(prepareResult.r2Key)}`,
+      {
+        method: "PUT",
+        body: chunk,
+      }
+    );
+
+    const partResult = await readApi<{ etag: string; partNumber: number }>(partResponse);
+    parts.push(partResult);
+
+    input.onProgress?.(Math.round(((i + 1) / totalParts) * 90)); // 0-90% for parts
+  }
+
+  // Step 3: Complete multipart upload
+  const completeResponse = await fetch(
+    `/api/v1/rooms/${input.roomId}/assets/multipart/${prepareResult.uploadId}/complete`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assetId: prepareResult.assetId,
+        contentType: prepareResult.contentType,
+        fileSize: input.file.size,
+        parts,
+        r2Key: prepareResult.r2Key,
+      }),
+    }
+  );
+
+  input.onProgress?.(100);
+  return readApi<RoomAssetResult>(completeResponse);
 }
 
 export async function getRoomAssets(
@@ -440,7 +634,7 @@ export async function getRoomAssets(
 
 export async function deleteRoomAsset(
   roomId: string,
-  field: "left_logo_url" | "right_logo_url" | "ad_video_url",
+  field: "left_logo_url" | "right_logo_url" | "team1_logo_url" | "team2_logo_url" | "ad_video_url",
   assetId?: string
 ): Promise<{ deleted: boolean; field: string }> {
   const query = new URLSearchParams({ field });
@@ -488,6 +682,7 @@ export async function updateAdminPackage(
 ): Promise<StreamingPackage> {
   const response = await fetch(`/api/v1/admin/packages/${packageId}`, {
     body: JSON.stringify(input),
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },
@@ -502,6 +697,7 @@ export async function approveAdminRoomPass(
 ): Promise<{ room: RoomSummary }> {
   const response = await fetch(`/api/v1/admin/room-passes/${roomPassId}/approve`, {
     method: "POST",
+    credentials: "include",
   });
 
   return readApi<{ room: RoomSummary }>(response);
@@ -512,6 +708,7 @@ export async function rejectAdminRoomPass(
 ): Promise<{ rejected: boolean }> {
   const response = await fetch(`/api/v1/admin/room-passes/${roomPassId}/reject`, {
     method: "POST",
+    credentials: "include",
   });
 
   return readApi<{ rejected: boolean }>(response);
@@ -522,6 +719,7 @@ export async function startAdminRoom(
 ): Promise<RoomSummary> {
   const response = await fetch(`/api/v1/admin/rooms/${roomId}/start`, {
     method: "POST",
+    credentials: "include",
   });
   const payload = await readApi<{ room: RoomSummary }>(response);
   return payload.room;
@@ -532,6 +730,7 @@ export async function expireAdminRoom(
 ): Promise<RoomSummary> {
   const response = await fetch(`/api/v1/admin/rooms/${roomId}/expire`, {
     method: "POST",
+    credentials: "include",
   });
   const payload = await readApi<{ room: RoomSummary }>(response);
   return payload.room;

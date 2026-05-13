@@ -8,6 +8,7 @@ import {
   resolvePackageById,
   type PackageRecord,
 } from "~/lib/multitenancy";
+import { normalizeScoringData, type ScoringData, type SportType } from "~/lib/scoring";
 import { DEFAULT_ICE_SERVERS, sanitizeIceServers, type IceServerConfig } from "~/lib/webrtc/ice-servers";
 
 /**
@@ -52,9 +53,10 @@ const RELAY_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 const ADMIN_SESSION_COOKIE = "live_studio_admin_session";
 const ADMIN_SESSION_TTL_SECONDS = 8 * 60 * 60;
 const GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-const ALLOWED_ASSET_FIELDS = ["left_logo_url", "right_logo_url", "ad_video_url"] as const;
+const ALLOWED_ASSET_FIELDS = ["left_logo_url", "right_logo_url", "team1_logo_url", "team2_logo_url", "ad_video_url"] as const;
 const MAX_LOGO_UPLOAD_BYTES = 1_200_000;
 const MAX_AD_VIDEO_UPLOAD_BYTES = 250_000_000;
+const MAX_SINGLE_UPLOAD_BYTES = 95_000_000; // Cloudflare Workers request body limit ~100MB
 
 type ApiSuccess<T extends Record<string, unknown>> = {
   success: true;
@@ -90,13 +92,16 @@ type RoomRecord = {
   facebook_output_url?: string | null;
   facebook_stream_key?: string | null;
   id: string;
+  is_paused?: number | null;
   name: string;
+  paused_at?: string | null;
   pin: string;
   scoring_token?: string | null;
   session_started_at?: string | null;
   status?: string | null;
   stream_playback_url?: string | null;
   tenant_id?: string | null;
+  total_seconds_used?: number | null;
   youtube_output_url?: string | null;
   youtube_stream_key?: string | null;
 };
@@ -110,6 +115,7 @@ type OverlayRecord = {
   ad_title?: string | null;
   ad_video_url?: string | null;
   clock_text?: string | null;
+  external_overlay_active?: number | null;
   external_scoreboard_url?: string | null;
   left_logo_url?: string | null;
   logo_url?: string | null;
@@ -121,8 +127,10 @@ type OverlayRecord = {
   scoring_data?: string | null;
   sponsor_text?: string | null;
   sport?: string | null;
+  team1_logo_url?: string | null;
   team1_name?: string | null;
   team1_score?: number | null;
+  team2_logo_url?: string | null;
   team2_name?: string | null;
   team2_score?: number | null;
   theme_variant?: string | null;
@@ -147,6 +155,7 @@ type RoomPassRecord = {
   duration_minutes: number;
   id: string;
   package_id?: string | null;
+  paid_at?: string | null;
   payment_provider?: string | null;
   room_id: string;
   status: string;
@@ -374,6 +383,43 @@ async function assertDirectorRoomAccess(
   return { room, tenant };
 }
 
+async function getTenantPaidRoomCount(
+  c: Context<{ Bindings: Bindings }>,
+  tenantId: string
+): Promise<number> {
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT r.id) AS room_count
+       FROM rooms r
+       INNER JOIN room_passes rp ON r.id = rp.room_id
+      WHERE r.tenant_id = ?
+        AND rp.status = 'paid'
+        AND (
+          r.status = 'ready'
+          OR (
+            r.status = 'active'
+            AND (r.expires_at IS NULL OR r.expires_at > datetime('now'))
+          )
+        )`
+  ).bind(tenantId).first<{ room_count: number }>();
+  return Number(row?.room_count ?? 0);
+}
+
+async function assertTenantRoomCapacity(
+  c: Context<{ Bindings: Bindings }>,
+  tenantId: string,
+  packageId?: string
+): Promise<void> {
+  const selectedPackage = await getSelectedPackage(c, packageId);
+  const maxRooms = selectedPackage.max_rooms;
+  const currentCount = await getTenantPaidRoomCount(c, tenantId);
+
+  if (currentCount >= maxRooms) {
+    throw new HTTPException(403, {
+      message: `This package allows up to ${maxRooms} active room${maxRooms === 1 ? "" : "s"}. You currently have ${currentCount}.`,
+    });
+  }
+}
+
 function getStripeSecretKey(c: Context<{ Bindings: Bindings }>): string {
   const secretKey = c.env.STRIPE_SECRET_KEY;
   if (!secretKey) {
@@ -512,6 +558,10 @@ function isRoomJoinable(room: RoomRecord): boolean {
     return false;
   }
 
+  if (room.is_paused) {
+    return true;
+  }
+
   if (!room.expires_at) {
     return true;
   }
@@ -526,22 +576,19 @@ async function checkAndExpireRoom(
   // Auto-expire: if room is active but past its expires_at, mark it expired now
   if (
     room.status === "active" &&
+    !room.is_paused &&
     room.expires_at &&
     new Date(room.expires_at).getTime() <= Date.now()
   ) {
-    const expiredAt = new Date(Date.now()).toISOString();
-    await c.env.DB.prepare(
-      `UPDATE rooms
-        SET expires_at = ?,
-            status = 'active',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`
-    ).bind(expiredAt, room.id).run();
+    return expireRoomAccessNow(c, room.id);
+  }
 
-    // Cleanup room assets from R2 and database
-    await clearRoomAssetsForRoom(c, room.id);
-
-    return { ...room, expires_at: expiredAt };
+  // Pool exhaustion check: expire if tenant has paid passes but no remaining time
+  if (room.status === "active" && !room.is_paused && room.tenant_id) {
+    const pool = await getTenantPool(c, room.tenant_id);
+    if (pool.totalSeconds > 0 && pool.remainingSeconds <= 0) {
+      return expireRoomAccessNow(c, room.id);
+    }
   }
 
   return room;
@@ -560,11 +607,17 @@ function isRoomVerifiable(room: RoomRecord): boolean {
 }
 
 function getRoomUnavailableMessage(room: RoomRecord): string {
+  if (room.status === "expired") {
+    return "This room has expired. Buy more minutes or create a new room to continue.";
+  }
+  if (room.status === "ready") {
+    return "This room is ready but has not been started yet.";
+  }
   if (room.status && room.status !== "active") {
     return "This room is not active yet. Complete payment before joining.";
   }
 
-  return "This room has expired. Buy a new room pass to continue streaming.";
+  return "This room is currently unavailable. Please check your dashboard.";
 }
 
 async function createStripeCheckoutSession({
@@ -649,10 +702,98 @@ async function retrieveStripeCheckoutSession(
   return response.json<StripeCheckoutSession>();
 }
 
+async function recalculateTenantEntitlements(
+  c: Context<{ Bindings: Bindings }>,
+  tenantId: string
+): Promise<void> {
+  const rows = await c.env.DB.prepare(
+    `SELECT SUM(rp.duration_minutes) AS total_minutes,
+            SUM(pkg.max_rooms) AS max_rooms
+       FROM room_passes rp
+       LEFT JOIN packages pkg ON pkg.id = rp.package_id
+      WHERE rp.tenant_id = ? AND rp.status = 'paid'`
+  ).bind(tenantId).first<{ total_minutes: number | null; max_rooms: number | null }>();
+
+  const totalMinutes = Number(rows?.total_minutes ?? 0);
+  const maxRooms = Number(rows?.max_rooms ?? 1);
+
+  const existing = await c.env.DB.prepare(
+    "SELECT id FROM tenant_entitlements WHERE tenant_id = ?"
+  ).bind(tenantId).first<{ id: string }>();
+
+  if (existing) {
+    await c.env.DB.prepare(
+      `UPDATE tenant_entitlements
+          SET total_minutes = ?, max_rooms = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = ?`
+    ).bind(totalMinutes, maxRooms, tenantId).run();
+  } else {
+    await c.env.DB.prepare(
+      `INSERT INTO tenant_entitlements (id, tenant_id, total_minutes, max_rooms)
+         VALUES (?, ?, ?, ?)`
+    ).bind(createPublicId("ent"), tenantId, totalMinutes, maxRooms).run();
+  }
+}
+
+async function getTenantEntitlements(
+  c: Context<{ Bindings: Bindings }>,
+  tenantId: string
+): Promise<{ totalMinutes: number; usedSeconds: number; maxRooms: number; remainingSeconds: number }> {
+  const ent = await c.env.DB.prepare(
+    "SELECT * FROM tenant_entitlements WHERE tenant_id = ?"
+  ).bind(tenantId).first<{ total_minutes: number; used_seconds: number; max_rooms: number }>();
+
+  if (!ent) {
+    return { totalMinutes: 0, usedSeconds: 0, maxRooms: 1, remainingSeconds: 0 };
+  }
+
+  const roomsResult = await c.env.DB.prepare(
+    "SELECT total_seconds_used, session_started_at, is_paused, status FROM rooms WHERE tenant_id = ? AND status = 'active'"
+  ).bind(tenantId).all<{ total_seconds_used: number | null; session_started_at: string | null; is_paused: number | null }>();
+
+  let usedSeconds = Number(ent.used_seconds ?? 0);
+  const nowMs = Date.now();
+  for (const room of roomsResult.results ?? []) {
+    if (!room.is_paused && room.session_started_at) {
+      usedSeconds += Math.max(0, Math.floor((nowMs - new Date(room.session_started_at).getTime()) / 1000));
+    }
+  }
+
+  const totalSeconds = Number(ent.total_minutes) * 60;
+  return {
+    totalMinutes: Number(ent.total_minutes),
+    usedSeconds,
+    maxRooms: Number(ent.max_rooms),
+    remainingSeconds: Math.max(0, totalSeconds - usedSeconds),
+  };
+}
+
+async function getTenantActiveRoomCount(
+  c: Context<{ Bindings: Bindings }>,
+  tenantId: string
+): Promise<number> {
+  const row = await c.env.DB.prepare(
+    "SELECT COUNT(*) AS cnt FROM rooms WHERE tenant_id = ? AND status IN ('ready', 'active')"
+  ).bind(tenantId).first<{ cnt: number }>();
+  return Number(row?.cnt ?? 0);
+}
+
+async function recordUsedSeconds(
+  c: Context<{ Bindings: Bindings }>,
+  tenantId: string,
+  seconds: number
+): Promise<void> {
+  await c.env.DB.prepare(
+    `UPDATE tenant_entitlements
+       SET used_seconds = MAX(0, used_seconds + ?), updated_at = CURRENT_TIMESTAMP
+     WHERE tenant_id = ?`
+  ).bind(seconds, tenantId).run();
+}
+
 async function activatePaidRoom(
   c: Context<{ Bindings: Bindings }>,
   checkoutSessionId: string
-): Promise<RoomRecord> {
+): Promise<void> {
   const roomPass = await c.env.DB.prepare(
     "SELECT * FROM room_passes WHERE checkout_session_id = ?"
   ).bind(checkoutSessionId).first<RoomPassRecord>();
@@ -662,39 +803,19 @@ async function activatePaidRoom(
   }
 
   await c.env.DB.prepare(
-    `UPDATE rooms
-      SET status = 'ready',
-          expires_at = NULL,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE checkout_session_id = ?`
-  ).bind(checkoutSessionId).run();
-
-  await c.env.DB.prepare(
     `UPDATE room_passes
-      SET status = 'paid',
-          paid_at = CURRENT_TIMESTAMP
-      WHERE checkout_session_id = ?`
+       SET status = 'paid',
+           paid_at = CURRENT_TIMESTAMP
+       WHERE checkout_session_id = ?`
   ).bind(checkoutSessionId).run();
 
-  const room = await c.env.DB.prepare(
-    "SELECT * FROM rooms WHERE checkout_session_id = ?"
-  ).bind(checkoutSessionId).first<RoomRecord>();
-
-  if (!room) {
-    throw new HTTPException(404, { message: "Room not found for this checkout session" });
-  }
-
-  return {
-    ...room,
-    expires_at: null,
-    status: "ready",
-  };
+  await recalculateTenantEntitlements(c, roomPass.tenant_id);
 }
 
 async function activateRoomPassById(
   c: Context<{ Bindings: Bindings }>,
   roomPassId: string
-): Promise<RoomRecord> {
+): Promise<void> {
   const roomPass = await c.env.DB.prepare(
     "SELECT * FROM room_passes WHERE id = ?"
   ).bind(roomPassId).first<RoomPassRecord>();
@@ -704,33 +825,13 @@ async function activateRoomPassById(
   }
 
   await c.env.DB.prepare(
-    `UPDATE rooms
-      SET status = 'ready',
-          expires_at = NULL,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?`
-  ).bind(roomPass.room_id).run();
-
-  await c.env.DB.prepare(
     `UPDATE room_passes
-      SET status = 'paid',
-          paid_at = CURRENT_TIMESTAMP
-      WHERE id = ?`
+       SET status = 'paid',
+           paid_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
   ).bind(roomPassId).run();
 
-  const room = await c.env.DB.prepare(
-    "SELECT * FROM rooms WHERE id = ?"
-  ).bind(roomPass.room_id).first<RoomRecord>();
-
-  if (!room) {
-    throw new HTTPException(404, { message: "Room not found for this room pass" });
-  }
-
-  return {
-    ...room,
-    expires_at: null,
-    status: "ready",
-  };
+  await recalculateTenantEntitlements(c, roomPass.tenant_id);
 }
 
 async function startRoomSession(
@@ -746,6 +847,9 @@ async function startRoomSession(
   }
 
   if (room.status === "active") {
+    if (room.is_paused) {
+      return resumeRoomSession(c, roomId);
+    }
     if (!isRoomJoinable(room)) {
       throw new HTTPException(403, { message: getRoomUnavailableMessage(room) });
     }
@@ -756,25 +860,30 @@ async function startRoomSession(
     throw new HTTPException(403, { message: getRoomUnavailableMessage(room) });
   }
 
-  const roomPass = await c.env.DB.prepare(
-    "SELECT * FROM room_passes WHERE room_id = ? ORDER BY paid_at DESC, created_at DESC LIMIT 1"
-  ).bind(roomId).first<RoomPassRecord>();
-  const durationMinutes = roomPass?.duration_minutes ?? ROOM_PASS_DURATION_MINUTES;
-  const expiresAt = new Date(Date.now() + durationMinutes * 60_000).toISOString();
+  await assertPoolHasTime(c, room.tenant_id ?? "");
+  const pool = await getTenantPool(c, room.tenant_id ?? "");
+  const expiresAt = new Date(Date.now() + pool.remainingSeconds * 1000).toISOString();
 
   await c.env.DB.prepare(
     `UPDATE rooms
-      SET status = 'active',
-          expires_at = ?,
-          session_started_at = CURRENT_TIMESTAMP,
-          updated_at = CURRENT_TIMESTAMP
+        SET status = 'active',
+            is_paused = 0,
+            paused_at = NULL,
+            total_seconds_used = 0,
+            expires_at = ?,
+            session_started_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`
   ).bind(expiresAt, roomId).run();
+
+  await recordRoomTimeSession(c, roomId, "start", 0);
 
   return {
     ...room,
     expires_at: expiresAt,
+    is_paused: 0,
     status: "active",
+    total_seconds_used: 0,
   };
 }
 
@@ -822,6 +931,219 @@ async function assertRoomCameraCapacity(
   }
 }
 
+type TenantPool = {
+  remainingSeconds: number;
+  totalSeconds: number;
+  usedSeconds: number;
+};
+
+async function getTenantPool(
+  c: Context<{ Bindings: Bindings }>,
+  tenantId: string
+): Promise<TenantPool> {
+  const totalRow = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(duration_minutes), 0) AS total_minutes
+       FROM room_passes
+      WHERE tenant_id = ? AND status = 'paid'`
+  ).bind(tenantId).first<{ total_minutes: number }>();
+  const totalSeconds = Number(totalRow?.total_minutes ?? 0) * 60;
+
+  const roomsResult = await c.env.DB.prepare(
+    `SELECT total_seconds_used, session_started_at, is_paused, status
+       FROM rooms
+      WHERE tenant_id = ? AND status = 'active'`
+  ).bind(tenantId).all<RoomRecord>();
+
+  const ent = await c.env.DB.prepare(
+    "SELECT used_seconds FROM tenant_entitlements WHERE tenant_id = ?"
+  ).bind(tenantId).first<{ used_seconds: number }>();
+
+  let usedSeconds = Number(ent?.used_seconds ?? 0);
+  const nowMs = Date.now();
+  for (const room of roomsResult.results ?? []) {
+    if (!room.is_paused && room.session_started_at) {
+      const runningMs = nowMs - new Date(room.session_started_at).getTime();
+      usedSeconds += Math.max(0, Math.floor(runningMs / 1000));
+    }
+  }
+
+  return {
+    remainingSeconds: Math.max(0, totalSeconds - usedSeconds),
+    totalSeconds,
+    usedSeconds,
+  };
+}
+
+async function assertPoolHasTime(
+  c: Context<{ Bindings: Bindings }>,
+  tenantId: string,
+  minimumSeconds = 1
+): Promise<void> {
+  const pool = await getTenantPool(c, tenantId);
+  if (pool.remainingSeconds < minimumSeconds) {
+    throw new HTTPException(403, {
+      message: `Time budget exhausted (${Math.floor(pool.usedSeconds / 60)} min used of ${Math.floor(pool.totalSeconds / 60)} min). Purchase more time to continue.`,
+    });
+  }
+}
+
+function calculateRoomSecondsUsed(room: RoomRecord): number {
+  const baseUsed = Number(room.total_seconds_used ?? 0);
+  if (room.status === "active" && !room.is_paused && room.session_started_at) {
+    const runningMs = Date.now() - new Date(room.session_started_at).getTime();
+    return baseUsed + Math.max(0, Math.floor(runningMs / 1000));
+  }
+  return baseUsed;
+}
+
+async function recordRoomTimeSession(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string,
+  eventType: "start" | "pause" | "resume" | "expire",
+  secondsElapsed: number
+): Promise<void> {
+  await c.env.DB.prepare(
+    `INSERT INTO room_time_sessions (id, room_id, started_at, seconds_elapsed, event_type)
+     VALUES (?, ?, datetime('now'), ?, ?)`
+  ).bind(createPublicId("sess"), roomId, secondsElapsed, eventType).run();
+}
+
+async function pauseRoomSession(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string
+): Promise<RoomRecord> {
+  const room = await c.env.DB.prepare("SELECT * FROM rooms WHERE id = ?")
+    .bind(roomId)
+    .first<RoomRecord>();
+
+  if (!room) {
+    throw new HTTPException(404, { message: "Room not found" });
+  }
+
+  if (room.status !== "active" || room.is_paused) {
+    return room;
+  }
+
+  const runningSeconds = room.session_started_at
+    ? Math.max(0, Math.floor((Date.now() - new Date(room.session_started_at).getTime()) / 1000))
+    : 0;
+  const totalSecondsUsed = Number(room.total_seconds_used ?? 0) + runningSeconds;
+
+  await c.env.DB.prepare(
+    `UPDATE rooms
+        SET is_paused = 1,
+            paused_at = datetime('now'),
+            total_seconds_used = ?,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`
+  ).bind(totalSecondsUsed, roomId).run();
+
+  await recordRoomTimeSession(c, roomId, "pause", runningSeconds);
+  await recordUsedSeconds(c, room.tenant_id ?? "", runningSeconds);
+
+  return {
+    ...room,
+    is_paused: 1,
+    paused_at: new Date().toISOString(),
+    total_seconds_used: totalSecondsUsed,
+  };
+}
+
+async function resumeRoomSession(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string
+): Promise<RoomRecord> {
+  const room = await c.env.DB.prepare("SELECT * FROM rooms WHERE id = ?")
+    .bind(roomId)
+    .first<RoomRecord>();
+
+  if (!room) {
+    throw new HTTPException(404, { message: "Room not found" });
+  }
+
+  if (room.status !== "active" || !room.is_paused) {
+    return room;
+  }
+
+  await assertPoolHasTime(c, room.tenant_id ?? "");
+
+  const pool = await getTenantPool(c, room.tenant_id ?? "");
+  const expiresAt = new Date(Date.now() + pool.remainingSeconds * 1000).toISOString();
+
+  await c.env.DB.prepare(
+    `UPDATE rooms
+        SET is_paused = 0,
+            paused_at = NULL,
+            session_started_at = datetime('now'),
+            expires_at = ?,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`
+  ).bind(expiresAt, roomId).run();
+
+  await recordRoomTimeSession(c, roomId, "resume", 0);
+
+  return {
+    ...room,
+    expires_at: expiresAt,
+    is_paused: 0,
+    paused_at: null,
+    session_started_at: new Date().toISOString(),
+  };
+}
+
+async function stopRoomSession(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string
+): Promise<RoomRecord> {
+  const room = await c.env.DB.prepare("SELECT * FROM rooms WHERE id = ?")
+    .bind(roomId)
+    .first<RoomRecord>();
+
+  if (!room) {
+    throw new HTTPException(404, { message: "Room not found" });
+  }
+
+  if (room.status !== "active") {
+    return room;
+  }
+
+  let totalSecondsUsed = Number(room.total_seconds_used ?? 0);
+  if (!room.is_paused && room.session_started_at) {
+    const runningSeconds = Math.max(
+      0,
+      Math.floor((Date.now() - new Date(room.session_started_at).getTime()) / 1000)
+    );
+    totalSecondsUsed += runningSeconds;
+  }
+
+  const expiresAt = new Date(Date.now()).toISOString();
+  await c.env.DB.prepare(
+    `UPDATE rooms
+        SET status = 'ended',
+            expires_at = ?,
+            is_paused = 0,
+            paused_at = NULL,
+            total_seconds_used = ?,
+            session_started_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`
+  ).bind(expiresAt, totalSecondsUsed, roomId).run();
+
+  const delta = totalSecondsUsed - Number(room.total_seconds_used ?? 0);
+  await recordRoomTimeSession(c, roomId, "expire", delta);
+  await recordUsedSeconds(c, room.tenant_id ?? "", delta);
+
+  return {
+    ...room,
+    expires_at: expiresAt,
+    is_paused: 0,
+    paused_at: null,
+    status: "ended",
+    total_seconds_used: totalSecondsUsed,
+    session_started_at: null,
+  };
+}
+
 async function expireRoomAccessNow(
   c: Context<{ Bindings: Bindings }>,
   roomId: string
@@ -834,20 +1156,39 @@ async function expireRoomAccessNow(
     throw new HTTPException(404, { message: "Room not found" });
   }
 
+  let totalSecondsUsed = Number(room.total_seconds_used ?? 0);
+  if (room.status === "active" && !room.is_paused && room.session_started_at) {
+    const runningSeconds = Math.max(
+      0,
+      Math.floor((Date.now() - new Date(room.session_started_at).getTime()) / 1000)
+    );
+    totalSecondsUsed += runningSeconds;
+  }
+
   const expiresAt = new Date(Date.now()).toISOString();
   await c.env.DB.prepare(
     `UPDATE rooms
-      SET status = 'active',
-          expires_at = ?,
-          updated_at = CURRENT_TIMESTAMP
+        SET status = 'expired',
+            expires_at = ?,
+            is_paused = 0,
+            paused_at = NULL,
+            total_seconds_used = ?,
+            updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`
-  ).bind(expiresAt, roomId).run();
-  await clearRoomAssetsForRoom(c, roomId);
+  ).bind(expiresAt, totalSecondsUsed, roomId).run();
+  await clearRoomAssetsAndOverlay(c, roomId);
+
+  const delta = totalSecondsUsed - Number(room.total_seconds_used ?? 0);
+  await recordRoomTimeSession(c, roomId, "expire", delta);
+  await recordUsedSeconds(c, room.tenant_id ?? "", delta);
 
   return {
     ...room,
     expires_at: expiresAt,
+    is_paused: 0,
+    paused_at: null,
     status: "active",
+    total_seconds_used: totalSecondsUsed,
   };
 }
 
@@ -1083,7 +1424,7 @@ function getR2AssetsBucket(c: Context<{ Bindings: Bindings }>): R2Bucket {
 function assertAssetOverlayField(value: FormDataEntryValue | string | null): AssetOverlayField {
   const field = typeof value === "string" ? value : "";
   if (!ALLOWED_ASSET_FIELDS.includes(field as AssetOverlayField)) {
-    throw new HTTPException(400, { message: "Asset field must be left_logo_url, right_logo_url, or ad_video_url" });
+    throw new HTTPException(400, { message: "Asset field must be left_logo_url, right_logo_url, team1_logo_url, team2_logo_url, or ad_video_url" });
   }
 
   return field as AssetOverlayField;
@@ -1133,15 +1474,9 @@ function buildAssetPublicUrl(c: Context<{ Bindings: Bindings }>, key: string): s
     return `${publicBaseUrl}/${key}`;
   }
 
-  // Extract extension from key (format: rooms/{roomId}/{field}/{assetId}.{ext})
-  const lastDotIndex = key.lastIndexOf(".");
-  const hasVideoOrImageExt = lastDotIndex > 0 && [".mp4", ".webm", ".mov", ".m4v", ".ogg", ".ogv", ".m3u8", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"].some((ext) => key.toLowerCase().endsWith(ext));
-
-  if (hasVideoOrImageExt) {
-    const keyWithoutExt = key.slice(0, lastDotIndex);
-    return `${getPublicOrigin(c)}/api/v1/assets/${toBase64UrlText(keyWithoutExt)}`;
-  }
-
+  // Encode the FULL R2 key (including extension) so the serving endpoint
+  // can look it up directly. Never strip the extension — doing so causes
+  // "Asset not found" because R2 stores the object WITH the extension.
   return `${getPublicOrigin(c)}/api/v1/assets/${toBase64UrlText(key)}`;
 }
 
@@ -1228,13 +1563,15 @@ async function clearRoomAsset(
   }
 }
 
-async function clearRoomAssetsForRoom(
+async function clearRoomAssetsAndOverlay(
   c: Context<{ Bindings: Bindings }>,
   roomId: string
 ): Promise<void> {
   for (const asset of await getActiveRoomAssets(c, roomId)) {
     await clearRoomAsset(c, asset);
   }
+  // Hard-delete overlays row — room is expired and data is no longer needed
+  await c.env.DB.prepare("DELETE FROM overlays WHERE room_id = ?").bind(roomId).run();
 }
 
 function jsonSuccess<T extends Record<string, unknown>>(
@@ -1473,6 +1810,7 @@ async function ensureOverlayRow(c: Context<{ Bindings: Bindings }>, roomId: stri
       sponsor_text,
       match_status,
       clock_text,
+      external_overlay_active,
       external_scoreboard_url,
       theme_variant,
       sport,
@@ -1483,7 +1821,7 @@ async function ensureOverlayRow(c: Context<{ Bindings: Bindings }>, roomId: stri
       scoreboard_active,
       program_source,
       scoring_data
-    ) VALUES (?, '', '', '', 0, '', 'LIVE', '00:00', '', 'broadcast', 'football', 'TEAM A', 'TEAM B', 0, 0, 0, 'live', '{}')`
+    ) VALUES (?, '', '', '', 0, '', 'LIVE', '00:00', 0, '', 'broadcast', 'football', 'TEAM A', 'TEAM B', 0, 0, 0, 'live', '{}')`
   ).bind(roomId).run();
 }
 
@@ -1506,12 +1844,16 @@ function getBroadcastDestinations(room: RoomRecord): BroadcastDestinationRecord[
 }
 
 function normalizeOverlayRecord(overlay: OverlayRecord) {
-  const parsedScoringData = overlay.scoring_data ? JSON.parse(overlay.scoring_data) : {};
+  const sport =
+    overlay.sport === "cricket" || overlay.sport === "generic" ? overlay.sport : "football";
+  const parsedScoringData = parseScoringData(overlay.scoring_data);
+  const scoringData = normalizeScoringDataForSport(parsedScoringData, sport);
 
   return {
     ad_title: overlay.ad_title ?? "",
     ad_video_url: overlay.ad_video_url ?? "",
     clock_text: overlay.clock_text ?? "00:00",
+    external_overlay_active: overlay.external_overlay_active ?? 0,
     external_scoreboard_url: normalizeExternalUrl(overlay.external_scoreboard_url),
     left_logo_url: overlay.left_logo_url ?? overlay.logo_url ?? "",
     logo_url: overlay.logo_url ?? "",
@@ -1520,12 +1862,13 @@ function normalizeOverlayRecord(overlay: OverlayRecord) {
     right_logo_url: overlay.right_logo_url ?? overlay.logo_url ?? "",
     room_id: overlay.room_id,
     scoreboard_active: overlay.scoreboard_active ?? 0,
-    scoring_data: typeof parsedScoringData === "object" && parsedScoringData ? parsedScoringData : {},
+    scoring_data: scoringData,
     sponsor_text: overlay.sponsor_text ?? "",
-    sport:
-      overlay.sport === "cricket" || overlay.sport === "generic" ? overlay.sport : "football",
+    sport,
+    team1_logo_url: overlay.team1_logo_url ?? "",
     team1_name: overlay.team1_name ?? "TEAM A",
     team1_score: overlay.team1_score ?? 0,
+    team2_logo_url: overlay.team2_logo_url ?? "",
     team2_name: overlay.team2_name ?? "TEAM B",
     team2_score: overlay.team2_score ?? 0,
     theme_variant:
@@ -1536,6 +1879,52 @@ function normalizeOverlayRecord(overlay: OverlayRecord) {
     ticker_text: overlay.ticker_text ?? "",
     updated_at: overlay.updated_at ?? null,
   };
+}
+
+function parseScoringData(value: string | null | undefined): ScoringData {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isScoringData(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isScoringData(value: unknown): value is ScoringData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every(
+    (item) => typeof item === "number" || typeof item === "string"
+  );
+}
+
+function normalizeScoringDataForSport(scoringData: ScoringData, sport: string | null | undefined): ScoringData {
+  return normalizeScoringData(toSportType(sport), scoringData);
+}
+
+function toSportType(sport: string | null | undefined): SportType {
+  return sport === "cricket" || sport === "generic" ? sport : "football";
+}
+
+async function resolveOverlaySport(
+  c: Context<{ Bindings: Bindings }>,
+  roomId: string,
+  incomingSport: string | null | undefined
+): Promise<string | null | undefined> {
+  if (incomingSport) {
+    return incomingSport;
+  }
+
+  const existingOverlay = await c.env.DB.prepare("SELECT sport FROM overlays WHERE room_id = ?")
+    .bind(roomId)
+    .first<Pick<OverlayRecord, "sport">>();
+  return existingOverlay?.sport;
 }
 
 // Create a Hono instance structured with /api basepath
@@ -1722,35 +2111,77 @@ app.get("/v1/accounts/me", async (c) => {
   });
 });
 
+app.get("/v1/accounts/me/entitlements", async (c) => {
+  const accessToken = c.req.query("access_token")?.trim() ?? "";
+  const tenant = await getTenantByAccessToken(c, accessToken);
+
+  const passesResult = await c.env.DB.prepare(
+    `SELECT rp.*, pkg.name AS package_name, pkg.max_rooms AS pkg_max_rooms,
+            pkg.max_cameras AS pkg_max_cameras, pkg.max_ad_videos AS pkg_max_ad_videos
+       FROM room_passes rp
+       LEFT JOIN packages pkg ON pkg.id = rp.package_id
+      WHERE rp.tenant_id = ? AND rp.status IN ('paid', 'pending_manual_review')
+      ORDER BY rp.paid_at DESC, rp.created_at DESC`
+  ).bind(tenant.id).all<RoomPassRecord & { package_name: string; pkg_max_rooms: number; pkg_max_cameras: number; pkg_max_ad_videos: number }>();
+
+  const ent = await getTenantEntitlements(c, tenant.id);
+  const activeRoomCount = await getTenantActiveRoomCount(c, tenant.id);
+  const roomsResult = await c.env.DB.prepare(
+    "SELECT id, name, status, is_paused, total_seconds_used, session_started_at FROM rooms WHERE tenant_id = ? AND status IN ('ready', 'active') ORDER BY created_at DESC"
+  ).bind(tenant.id).all<{ id: string; name: string; status: string; is_paused: number | null; total_seconds_used: number | null; session_started_at: string | null }>();
+
+  return jsonSuccess(c, {
+    entitlements: {
+      totalMinutes: ent.totalMinutes,
+      usedSeconds: ent.usedSeconds,
+      remainingSeconds: ent.remainingSeconds,
+      maxRooms: ent.maxRooms,
+      activeRooms: activeRoomCount,
+      availableRooms: Math.max(0, ent.maxRooms - activeRoomCount),
+    },
+    purchases: (passesResult.results ?? []).map((rp) => ({
+      id: rp.id,
+      packageName: rp.package_name,
+      amountCents: rp.amount_cents,
+      currency: rp.currency,
+      durationMinutes: rp.duration_minutes,
+      maxRooms: rp.pkg_max_rooms,
+      maxCameras: rp.pkg_max_cameras,
+      maxAdVideos: rp.pkg_max_ad_videos,
+      status: rp.status,
+      paidAt: rp.paid_at,
+    })),
+    rooms: (roomsResult.results ?? []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      isPaused: r.is_paused,
+      totalSecondsUsed: r.total_seconds_used,
+      sessionStartedAt: r.session_started_at,
+    })),
+  });
+});
+
 app.post("/v1/director-access", async (c) => {
   const body = await c.req
-    .json<{ accessToken?: string; pin?: string }>()
-    .catch((): { accessToken?: string; pin?: string } => ({}));
-  const pin = body.pin?.trim() ?? "";
+    .json<{ accessToken?: string; roomId?: string }>()
+    .catch((): { accessToken?: string; roomId?: string } => ({}));
+  const roomId = body.roomId?.trim() ?? "";
   const accessToken = body.accessToken?.trim() ?? "";
 
-  if (!pin) {
-    throw new HTTPException(400, { message: "Room PIN is required" });
+  if (!roomId) {
+    throw new HTTPException(400, { message: "Room id is required" });
   }
 
   if (!accessToken) {
     throw new HTTPException(401, { message: "Director account access is required" });
   }
 
-  const room = await c.env.DB.prepare("SELECT * FROM rooms WHERE pin = ?")
-    .bind(pin)
-    .first<RoomRecord>();
-
-  if (!room) {
-    throw new HTTPException(404, { message: "Invalid PIN or Room not found" });
-  }
-
+  const { room } = await assertDirectorRoomAccess(c, roomId, accessToken);
   const verifiedRoom = await checkAndExpireRoom(c, room);
   if (!isRoomVerifiable(verifiedRoom)) {
     throw new HTTPException(403, { message: getRoomUnavailableMessage(verifiedRoom) });
   }
-
-  await assertDirectorRoomAccess(c, verifiedRoom.id, accessToken);
 
   if (!verifiedRoom.scoring_token) {
     verifiedRoom.scoring_token = crypto.randomUUID().replaceAll("-", "");
@@ -1907,13 +2338,14 @@ app.patch("/v1/admin/packages/:id", async (c) => {
 app.post("/v1/admin/room-passes/:id/approve", async (c) => {
   assertAdminRequest(c);
   const roomPassId = c.req.param("id");
-  const room = await activateRoomPassById(c, roomPassId);
+  await activateRoomPassById(c, roomPassId);
+  const roomPass = await c.env.DB.prepare("SELECT * FROM room_passes WHERE id = ?").bind(roomPassId).first<RoomPassRecord>();
   await recordAdminAudit(c, {
     action: "room_pass_approve",
     targetId: roomPassId,
     targetType: "room_pass",
   });
-  return jsonSuccess(c, { room: toRoomSummary(room) });
+  return jsonSuccess(c, { success: true, roomPass });
 });
 
 app.post("/v1/admin/room-passes/:id/reject", async (c) => {
@@ -1996,13 +2428,8 @@ app.post("/v1/manual-room-passes", async (c) => {
     );
   const tenant = await getTenantByAccessToken(c, body.accessToken?.trim() ?? "");
   const selectedPackage = await getSelectedPackage(c, body.packageId);
-  const roomName = body.roomName?.trim() || "Live Match Room";
   const bkashSenderNumber = normalizePhone(body.bkashSenderNumber);
   const bkashTransactionId = body.bkashTransactionId?.trim().toUpperCase() ?? "";
-
-  if (roomName.length < 3 || roomName.length > 80) {
-    throw new HTTPException(400, { message: "Room name must be between 3 and 80 characters" });
-  }
 
   assertBangladeshPhone(bkashSenderNumber, "bKash sender number");
 
@@ -2010,30 +2437,8 @@ app.post("/v1/manual-room-passes", async (c) => {
     throw new HTTPException(400, { message: "A valid bKash transaction ID is required" });
   }
 
-  const roomId = createPublicId("room");
   const orderId = createPublicId("pass");
-  const pin = createRoomPin();
   const amountCents = selectedPackage.price_cents || getRoomPassPriceCents(c);
-
-  await c.env.DB.prepare(
-    `INSERT INTO rooms (
-      id,
-      name,
-      pin,
-      tenant_id,
-      customer_email,
-      status,
-      checkout_session_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    roomId,
-    roomName,
-    pin,
-    tenant.id,
-    tenant.email,
-    "pending_manual_review",
-    null
-  ).run();
 
   await c.env.DB.prepare(
     `INSERT INTO room_passes (
@@ -2053,7 +2458,7 @@ app.post("/v1/manual-room-passes", async (c) => {
   ).bind(
     orderId,
     tenant.id,
-    roomId,
+    null,
     null,
     "pending_manual_review",
     amountCents,
@@ -2065,21 +2470,12 @@ app.post("/v1/manual-room-passes", async (c) => {
     selectedPackage.id
   ).run();
 
-  await ensureOverlayRow(c, roomId);
-
   return jsonSuccess(c, {
     payment: {
       amountCents,
       bkashMerchantNumber: getBkashMerchantNumber(c),
       id: orderId,
       status: "pending_manual_review",
-    },
-    room: {
-      id: roomId,
-      name: roomName,
-      pin,
-      status: "pending_manual_review",
-      tenant_id: tenant.id,
     },
   });
 });
@@ -2099,8 +2495,58 @@ app.post("/v1/manual-room-passes/:id/approve", async (c) => {
     throw new HTTPException(401, { message: "Manual payment approval token is invalid" });
   }
 
-  const room = await activateRoomPassById(c, c.req.param("id"));
-  return jsonSuccess(c, { room: toRoomSummary(room) });
+  await activateRoomPassById(c, c.req.param("id"));
+  const roomPass = await c.env.DB.prepare("SELECT * FROM room_passes WHERE id = ?").bind(c.req.param("id")).first<RoomPassRecord>();
+  return jsonSuccess(c, { success: true, roomPass });
+});
+
+app.post("/v1/rooms", async (c) => {
+  const body = await c.req
+    .json<{ accessToken?: string; name?: string }>()
+    .catch((): { accessToken?: string; name?: string } => ({}));
+  const accessToken = body.accessToken?.trim() ?? "";
+  const tenant = await getTenantByAccessToken(c, accessToken);
+
+  const ent = await getTenantEntitlements(c, tenant.id);
+  const activeRoomCount = await getTenantActiveRoomCount(c, tenant.id);
+
+  if (activeRoomCount >= ent.maxRooms) {
+    throw new HTTPException(403, {
+      message: `You can only have ${ent.maxRooms} room${ent.maxRooms === 1 ? "" : "s"}. Purchase more to create additional rooms.`,
+    });
+  }
+
+  if (ent.remainingSeconds <= 0) {
+    throw new HTTPException(403, {
+      message: `No time remaining. Purchase more minutes to create a room.`,
+    });
+  }
+
+  const roomName = body.name?.trim() || "Live Match Room";
+  if (roomName.length < 3 || roomName.length > 80) {
+    throw new HTTPException(400, { message: "Room name must be between 3 and 80 characters" });
+  }
+
+  const roomId = createPublicId("room");
+  const pin = createRoomPin();
+
+  await c.env.DB.prepare(
+    `INSERT INTO rooms (id, name, pin, tenant_id, customer_email, status) VALUES (?, ?, ?, ?, ?, 'ready')`
+  ).bind(roomId, roomName, pin, tenant.id, tenant.email).run();
+
+  await c.env.DB.prepare(
+    "INSERT INTO overlays (room_id) VALUES (?)"
+  ).bind(roomId).run();
+
+  return jsonSuccess(c, {
+    room: {
+      id: roomId,
+      name: roomName,
+      pin,
+      status: "ready",
+      tenant_id: tenant.id,
+    },
+  });
 });
 
 app.post("/v1/rooms/:id/start", async (c) => {
@@ -2112,28 +2558,91 @@ app.post("/v1/rooms/:id/start", async (c) => {
   return jsonSuccess(c, { room: toRoomSummary(room) });
 });
 
+app.post("/v1/rooms/:id/expire", async (c) => {
+  const body = await c.req
+    .json<{ accessToken?: string }>()
+    .catch((): { accessToken?: string } => ({}));
+  await assertDirectorRoomAccess(c, c.req.param("id"), body.accessToken?.trim() ?? "");
+  const room = await expireRoomAccessNow(c, c.req.param("id"));
+  return jsonSuccess(c, { room: toRoomSummary(room) });
+});
+
+app.post("/v1/rooms/:id/pause", async (c) => {
+  const body = await c.req
+    .json<{ accessToken?: string }>()
+    .catch((): { accessToken?: string } => ({}));
+  await assertDirectorRoomAccess(c, c.req.param("id"), body.accessToken?.trim() ?? "");
+  const room = await pauseRoomSession(c, c.req.param("id"));
+  return jsonSuccess(c, { room: toRoomSummary(room) });
+});
+
+app.post("/v1/rooms/:id/resume", async (c) => {
+  const body = await c.req
+    .json<{ accessToken?: string }>()
+    .catch((): { accessToken?: string } => ({}));
+  await assertDirectorRoomAccess(c, c.req.param("id"), body.accessToken?.trim() ?? "");
+  const room = await resumeRoomSession(c, c.req.param("id"));
+  return jsonSuccess(c, { room: toRoomSummary(room) });
+});
+
+app.post("/v1/rooms/:id/stop", async (c) => {
+  const body = await c.req
+    .json<{ accessToken?: string }>()
+    .catch((): { accessToken?: string } => ({}));
+  await assertDirectorRoomAccess(c, c.req.param("id"), body.accessToken?.trim() ?? "");
+  const room = await stopRoomSession(c, c.req.param("id"));
+  return jsonSuccess(c, { room: toRoomSummary(room) });
+});
+
+app.get("/v1/accounts/me/time-pool", async (c) => {
+  const accessToken = c.req.query("access_token")?.trim() ?? "";
+  const tenant = await getTenantByAccessToken(c, accessToken);
+  const pool = await getTenantPool(c, tenant.id);
+
+  const roomsResult = await c.env.DB.prepare(
+    `SELECT id, name, status, is_paused, total_seconds_used, session_started_at, expires_at
+       FROM rooms
+      WHERE tenant_id = ? AND status = 'active'
+      ORDER BY created_at DESC`
+  ).bind(tenant.id).all<RoomRecord>();
+
+  const rooms = (roomsResult.results ?? []).map((room) => ({
+    expiresAt: room.expires_at,
+    id: room.id,
+    isPaused: room.is_paused === 1,
+    name: room.name,
+    secondsUsed: calculateRoomSecondsUsed(room),
+    status: room.status,
+  }));
+
+  return jsonSuccess(c, {
+    pool: {
+      remainingMinutes: Math.floor(pool.remainingSeconds / 60),
+      remainingSeconds: pool.remainingSeconds,
+      totalMinutes: Math.floor(pool.totalSeconds / 60),
+      totalSeconds: pool.totalSeconds,
+      usedMinutes: Math.floor(pool.usedSeconds / 60),
+      usedSeconds: pool.usedSeconds,
+    },
+    rooms,
+  });
+});
+
 app.post("/v1/room-passes/checkout", async (c) => {
   const body = await c.req
-    .json<{ accessToken?: string; customerEmail?: string; packageId?: string; roomName?: string }>()
-    .catch((): { accessToken?: string; customerEmail?: string; packageId?: string; roomName?: string } => ({}));
+    .json<{ accessToken?: string; customerEmail?: string; packageId?: string }>()
+    .catch((): { accessToken?: string; customerEmail?: string; packageId?: string } => ({}));
   const selectedPackage = await getSelectedPackage(c, body.packageId);
   const accessToken = body.accessToken?.trim() ?? "";
   const tenant = accessToken ? await getTenantByAccessToken(c, accessToken) : null;
   const customerEmail = tenant?.email ?? body.customerEmail?.trim().toLowerCase() ?? "";
-  const roomName = body.roomName?.trim() || "Live Match Room";
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
     throw new HTTPException(400, { message: "Sign in or provide a valid customer email before checkout" });
   }
 
-  if (roomName.length < 3 || roomName.length > 80) {
-    throw new HTTPException(400, { message: "Room name must be between 3 and 80 characters" });
-  }
-
   const tenantId = tenant?.id ?? createPublicId("tenant");
-  const roomId = createPublicId("room");
   const orderId = createPublicId("pass");
-  const pin = createRoomPin();
   const amountCents = selectedPackage.price_cents || getRoomPassPriceCents(c);
 
   const session = await createStripeCheckoutSession({
@@ -2144,8 +2653,8 @@ app.post("/v1/room-passes/checkout", async (c) => {
     orderId,
     packageId: selectedPackage.id,
     packageName: selectedPackage.name,
-    roomId,
-    roomName,
+    roomId: createPublicId("room"),
+    roomName: "Room Pass Purchase",
     tenantId,
   });
 
@@ -2160,18 +2669,6 @@ app.post("/v1/room-passes/checkout", async (c) => {
   }
 
   await c.env.DB.prepare(
-    `INSERT INTO rooms (
-      id,
-      name,
-      pin,
-      tenant_id,
-      customer_email,
-      status,
-      checkout_session_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(roomId, roomName, pin, tenantId, customerEmail, "pending_payment", session.id).run();
-
-  await c.env.DB.prepare(
     `INSERT INTO room_passes (
       id,
       tenant_id,
@@ -2180,8 +2677,7 @@ app.post("/v1/room-passes/checkout", async (c) => {
       status,
       amount_cents,
       currency,
-      duration_minutes
-      ,
+      duration_minutes,
       payment_provider,
       bkash_sender_number,
       bkash_transaction_id,
@@ -2190,7 +2686,7 @@ app.post("/v1/room-passes/checkout", async (c) => {
   ).bind(
     orderId,
     tenantId,
-    roomId,
+    null,
     session.id,
     "pending_payment",
     amountCents,
@@ -2202,19 +2698,7 @@ app.post("/v1/room-passes/checkout", async (c) => {
     selectedPackage.id
   ).run();
 
-  await ensureOverlayRow(c, roomId);
-
-  return jsonSuccess(c, {
-    checkoutUrl: session.url,
-    durationMinutes: selectedPackage.duration_minutes,
-    room: {
-      id: roomId,
-      name: roomName,
-      pin,
-      status: "pending_payment",
-      tenant_id: tenantId,
-    },
-  });
+  return jsonSuccess(c, { checkoutUrl: session.url, passId: orderId });
 });
 
 app.get("/v1/room-passes/confirm", async (c) => {
@@ -2228,8 +2712,8 @@ app.get("/v1/room-passes/confirm", async (c) => {
     throw new HTTPException(402, { message: "Checkout session is not paid yet" });
   }
 
-  const room = await activatePaidRoom(c, sessionId);
-  return jsonSuccess(c, { room: toRoomSummary(room) });
+  await activatePaidRoom(c, sessionId);
+  return jsonSuccess(c, { success: true });
 });
 
 app.post("/v1/stripe/webhook", async (c) => {
@@ -2436,6 +2920,7 @@ app.post("/rooms/:id/overlays", async (c) => {
     ad_title?: string;
     ad_video_url?: string;
     clock_text?: string;
+    external_overlay_active?: number;
     external_scoreboard_url?: string;
     left_logo_url?: string;
     team1_name?: string;
@@ -2449,10 +2934,12 @@ app.post("/rooms/:id/overlays", async (c) => {
     sponsor_text?: string;
     theme_variant?: string;
     right_logo_url?: string;
+    team1_logo_url?: string;
+    team2_logo_url?: string;
     program_source?: string;
     scoreboard_active?: number;
     logo_url?: string;
-    scoring_data?: Record<string, number | string>;
+    scoring_data?: ScoringData;
   }>();
 
   const updates: string[] = [];
@@ -2462,6 +2949,7 @@ app.post("/rooms/:id/overlays", async (c) => {
     | "ad_title"
     | "ad_video_url"
     | "clock_text"
+    | "external_overlay_active"
     | "external_scoreboard_url"
     | "left_logo_url"
     | "team1_name"
@@ -2475,6 +2963,8 @@ app.post("/rooms/:id/overlays", async (c) => {
     | "sponsor_text"
     | "theme_variant"
     | "right_logo_url"
+    | "team1_logo_url"
+    | "team2_logo_url"
     | "program_source"
     | "scoreboard_active"
     | "logo_url",
@@ -2483,6 +2973,7 @@ app.post("/rooms/:id/overlays", async (c) => {
     ad_title: "ad_title",
     ad_video_url: "ad_video_url",
     clock_text: "clock_text",
+    external_overlay_active: "external_overlay_active",
     external_scoreboard_url: "external_scoreboard_url",
     left_logo_url: "left_logo_url",
     team1_name: "team1_name",
@@ -2496,6 +2987,8 @@ app.post("/rooms/:id/overlays", async (c) => {
     sponsor_text: "sponsor_text",
     theme_variant: "theme_variant",
     right_logo_url: "right_logo_url",
+    team1_logo_url: "team1_logo_url",
+    team2_logo_url: "team2_logo_url",
     program_source: "program_source",
     scoreboard_active: "scoreboard_active",
     logo_url: "logo_url",
@@ -2511,7 +3004,9 @@ app.post("/rooms/:id/overlays", async (c) => {
 
   if (body.scoring_data !== undefined) {
     updates.push("scoring_data = ?");
-    params.push(JSON.stringify(body.scoring_data));
+    const scoringSport = await resolveOverlaySport(c, roomId, body.sport);
+    const scoringData = normalizeScoringDataForSport(body.scoring_data, scoringSport);
+    params.push(JSON.stringify(scoringData));
   }
 
   if (updates.length === 0) {
@@ -2536,6 +3031,13 @@ app.post("/v1/rooms/:id/assets", async (c) => {
 
   if (!(file instanceof File)) {
     throw new HTTPException(400, { message: "An asset file is required" });
+  }
+
+  // For single-request uploads, enforce the Worker body size limit
+  if (file.size > MAX_SINGLE_UPLOAD_BYTES) {
+    throw new HTTPException(413, {
+      message: `File too large for single upload (${Math.round(file.size / 1_000_000)}MB). Use the multipart upload endpoint for files over ${Math.round(MAX_SINGLE_UPLOAD_BYTES / 1_000_000)}MB.`,
+    });
   }
 
   assertRoomAssetFile(field, file);
@@ -2598,6 +3100,124 @@ app.post("/v1/rooms/:id/assets", async (c) => {
   });
 });
 
+// ── Multipart Upload: Step 1 — Prepare ──
+app.post("/v1/rooms/:id/assets/multipart/prepare", async (c) => {
+  const roomId = c.req.param("id");
+  const room = await getRoomById(c, roomId);
+  const body = await c.req.json<{ contentType?: string; field: string; fileSize: number; filename?: string }>();
+  const field = assertAssetOverlayField(body.field);
+
+  if (!body.fileSize || body.fileSize <= 0 || body.fileSize > MAX_AD_VIDEO_UPLOAD_BYTES) {
+    throw new HTTPException(400, { message: `File must be between 1 byte and ${Math.round(MAX_AD_VIDEO_UPLOAD_BYTES / 1_000_000)}MB` });
+  }
+
+  if (field !== "ad_video_url") {
+    throw new HTTPException(400, { message: "Multipart upload is only supported for ad videos" });
+  }
+
+  const contentType = body.contentType || "video/mp4";
+  if (!contentType.startsWith("video/")) {
+    throw new HTTPException(400, { message: "Ad video upload must be a video file" });
+  }
+
+  await assertRoomAdVideoCapacity(c, roomId);
+  const assetId = createPublicId("asset");
+  const extension = contentType === "video/webm" ? "webm" : contentType === "video/quicktime" ? "mov" : "mp4";
+  const r2Key = `rooms/${roomId}/${field}/${assetId}.${extension}`;
+
+  const multipartUpload = await getR2AssetsBucket(c).createMultipartUpload(r2Key, {
+    httpMetadata: { contentType },
+    customMetadata: { field, roomId, tenantId: room.tenant_id ?? "" },
+  });
+
+  return jsonSuccess(c, {
+    assetId,
+    contentType,
+    r2Key,
+    uploadId: multipartUpload.uploadId,
+  });
+});
+
+// ── Multipart Upload: Step 2 — Upload Part ──
+app.put("/v1/rooms/:id/assets/multipart/:uploadId/parts/:partNumber", async (c) => {
+  const roomId = c.req.param("id");
+  await getRoomById(c, roomId); // verify room exists
+  const uploadId = c.req.param("uploadId");
+  const partNumber = Number(c.req.param("partNumber"));
+  const r2Key = c.req.query("key");
+
+  if (!uploadId || !r2Key) {
+    throw new HTTPException(400, { message: "uploadId and key query parameter are required" });
+  }
+
+  if (isNaN(partNumber) || partNumber < 1) {
+    throw new HTTPException(400, { message: "partNumber must be a positive integer" });
+  }
+
+  const multipartUpload = getR2AssetsBucket(c).resumeMultipartUpload(r2Key, uploadId);
+  const partBody = await c.req.arrayBuffer();
+  const uploadedPart = await multipartUpload.uploadPart(partNumber, partBody);
+
+  return jsonSuccess(c, {
+    etag: uploadedPart.etag,
+    partNumber: uploadedPart.partNumber,
+  });
+});
+
+// ── Multipart Upload: Step 3 — Complete ──
+app.post("/v1/rooms/:id/assets/multipart/:uploadId/complete", async (c) => {
+  const roomId = c.req.param("id");
+  const room = await getRoomById(c, roomId);
+  const uploadId = c.req.param("uploadId");
+  const body = await c.req.json<{
+    assetId: string;
+    contentType: string;
+    fileSize: number;
+    parts: Array<{ etag: string; partNumber: number }>;
+    r2Key: string;
+  }>();
+
+  if (!body.r2Key || !body.parts || body.parts.length === 0 || !body.assetId) {
+    throw new HTTPException(400, { message: "r2Key, assetId, and parts[] are required" });
+  }
+
+  const multipartUpload = getR2AssetsBucket(c).resumeMultipartUpload(body.r2Key, uploadId);
+  await multipartUpload.complete(body.parts);
+
+  const field: AssetOverlayField = "ad_video_url";
+  const publicUrl = buildAssetPublicUrl(c, body.r2Key);
+
+  await ensureOverlayRow(c, roomId);
+  await c.env.DB.prepare(
+    `INSERT INTO room_assets (
+      id, tenant_id, room_id, overlay_field, r2_key, public_url, content_type, size_bytes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    body.assetId,
+    room.tenant_id ?? null,
+    roomId,
+    field,
+    body.r2Key,
+    publicUrl,
+    body.contentType || "video/mp4",
+    body.fileSize ?? 0
+  ).run();
+  await c.env.DB.prepare(
+    `UPDATE overlays SET ${field} = ?, updated_at = CURRENT_TIMESTAMP WHERE room_id = ?`
+  ).bind(publicUrl, roomId).run();
+
+  return jsonSuccess(c, {
+    asset: {
+      contentType: body.contentType || "video/mp4",
+      field,
+      id: body.assetId,
+      publicUrl,
+      r2Key: body.r2Key,
+      sizeBytes: body.fileSize ?? 0,
+    },
+  });
+});
+
 app.get("/v1/rooms/:id/assets", async (c) => {
   const roomId = c.req.param("id");
   await getRoomById(c, roomId);
@@ -2638,62 +3258,57 @@ app.delete("/v1/rooms/:id/assets", async (c) => {
 
 app.get("/v1/assets/:encodedKey", async (c) => {
   const key = fromBase64UrlText(c.req.param("encodedKey"));
-  const object = await getR2AssetsBucket(c).get(key);
-  if (!object) {
-    throw new HTTPException(404, { message: "Asset not found" });
-  }
-
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set("Cache-Control", "public, max-age=31536000, immutable");
-  headers.set("ETag", object.httpEtag);
-  return new Response(object.body, { headers });
-});
-
-app.get("/v1/assets/:encodedKey", async (c) => {
-  const key = fromBase64UrlText(c.req.param("encodedKey"));
-  const object = await getR2AssetsBucket(c).get(key);
-  if (!object) {
-    throw new HTTPException(404, { message: "Asset not found" });
-  }
-
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set("Cache-Control", "public, max-age=31536000, immutable");
-  headers.set("ETag", object.httpEtag);
-  return new Response(object.body, { headers });
-});
-
-app.get("/v1/assets/:encodedKey/asset.:extension", async (c) => {
-  const key = fromBase64UrlText(c.req.param("encodedKey"));
-  const extension = c.req.param("extension");
-  const object = await getR2AssetsBucket(c).get(key);
-  if (!object) {
-    throw new HTTPException(404, { message: "Asset not found" });
-  }
-
-  const ext = extension.toLowerCase().startsWith(".") ? extension : `.${extension}`;
-  const contentTypes: Record<string, string> = {
-    ".mp4": "video/mp4",
-    ".webm": "video/webm",
-    ".ogg": "video/ogg",
-    ".ogv": "video/ogv",
-    ".mov": "video/quicktime",
-    ".m4v": "video/x-m4v",
-    ".m3u8": "application/x-mpegURL",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".svg": "image/svg+xml",
+  const rangeHeader = c.req.header("Range");
+  const r2Options: R2GetOptions = {
+    onlyIf: c.req.raw.headers,
+    range: rangeHeader ? c.req.raw.headers : undefined,
   };
 
+  let object = await getR2AssetsBucket(c).get(key, r2Options);
+  let resolvedKey = key;
+
+  // Backwards compatibility: older URLs were encoded WITHOUT the file
+  // extension. Try common extensions so previously generated URLs still work.
+  if (!object) {
+    const FALLBACK_EXTENSIONS = [".png", ".webp", ".jpg", ".jpeg", ".mp4", ".webm", ".mov", ".gif", ".svg"];
+    for (const ext of FALLBACK_EXTENSIONS) {
+      object = await getR2AssetsBucket(c).get(`${key}${ext}`, r2Options);
+      if (object) {
+        resolvedKey = `${key}${ext}`;
+        break;
+      }
+    }
+  }
+
+  if (!object) {
+    throw new HTTPException(404, { message: "Asset not found" });
+  }
+
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("Cache-Control", "public, max-age=31536000, immutable");
   headers.set("ETag", object.httpEtag);
-  headers.set("Content-Type", contentTypes[ext] ?? object.httpEtag);
+  headers.set("Accept-Ranges", "bytes");
+  // CORS: allow cross-origin loading for <video crossOrigin="anonymous"> and <img crossOrigin="anonymous">
+  headers.set("Access-Control-Allow-Origin", "*");
+
+  // Precondition failed (onlyIf didn't match — e.g. If-None-Match)
+  if (!("body" in object)) {
+    return new Response(undefined, { status: 304, headers });
+  }
+
+  // Range request → 206 Partial Content
+  if (object.range) {
+    const r2Range = object.range as { offset: number; length: number };
+    const start = r2Range.offset;
+    const end = start + r2Range.length - 1;
+    headers.set("Content-Range", `bytes ${start}-${end}/${object.size}`);
+    headers.set("Content-Length", String(r2Range.length));
+    return new Response(object.body, { status: 206, headers });
+  }
+
+  // Full response
+  headers.set("Content-Length", String(object.size));
   return new Response(object.body, { headers });
 });
 
@@ -2737,7 +3352,7 @@ app.post("/scoring/:token", async (c) => {
     throw new HTTPException(404, { message: "Scoring link not found" });
   }
 
-  const body = await c.req.json<Record<string, number | string | Record<string, number | string>>>();
+  const body = await c.req.json<Record<string, number | string | ScoringData>>();
 
   await ensureOverlayRow(c, room.id);
 
@@ -2794,7 +3409,13 @@ app.post("/scoring/:token", async (c) => {
   }
   if (body.scoring_data !== undefined) {
     updates.push("scoring_data = ?");
-    params.push(JSON.stringify(body.scoring_data));
+    const scoringSport = await resolveOverlaySport(
+      c,
+      room.id,
+      typeof body.sport === "string" ? body.sport : undefined
+    );
+    const scoringData = normalizeScoringDataForSport(body.scoring_data as ScoringData, scoringSport);
+    params.push(JSON.stringify(scoringData));
   }
 
   if (updates.length > 0) {

@@ -33,13 +33,15 @@ describe("getQualityConstraints", () => {
     });
   });
 
-  it("uses a landscape capture profile for mobile publishing", () => {
-    expect(getCameraPublishConstraints()).toEqual({
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      aspectRatio: { ideal: 16 / 9 },
-      frameRate: { ideal: 30, max: 30 },
-      resizeMode: "crop-and-scale",
-    });
+  it("uses orientation-aware constraints for mobile publishing", () => {
+    const result = getCameraPublishConstraints();
+    // In node/test env, screen.orientation is undefined and
+    // window dimensions are both 0, so isLandscape is false → portrait profile.
+    const isTestLandscape =
+      typeof screen !== "undefined" && screen.orientation
+        ? screen.orientation.angle === 90 || screen.orientation.angle === 270
+        : typeof window !== "undefined" && window.innerWidth > window.innerHeight;
+
+    expect(result).toEqual(getQualityConstraints("hd", isTestLandscape));
   });
 });

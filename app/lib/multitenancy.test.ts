@@ -40,4 +40,36 @@ describe("multitenancy package catalog", () => {
       ["season-ops", 3],
     ]);
   });
+
+  it("formats BDT prices without decimal when cents are a multiple of 100", () => {
+    expect(formatPackagePrice({ amountCents: 15000, currency: "bdt" })).toBe("৳150");
+  });
+
+  it("formats USD prices with two decimal places", () => {
+    expect(formatPackagePrice({ amountCents: 2499, currency: "usd" })).toBe("$24.99");
+  });
+
+  it("formats zero cents as free", () => {
+    expect(formatPackagePrice({ amountCents: 0, currency: "usd" })).toBe("$0.00");
+  });
+
+  it("handles large BDT amounts without scientific notation", () => {
+    expect(formatPackagePrice({ amountCents: 9999999, currency: "bdt" })).toBe("৳100,000");
+    expect(formatPackagePrice({ amountCents: 1234567, currency: "bdt" })).toBe("৳12,346");
+  });
+  it("handles empty package lists in resolvePackageById", () => {
+    // Should fallback to DEFAULT_PACKAGES[0] if provided list is empty
+    expect(resolvePackageById("some-id", [])).toBe(DEFAULT_PACKAGES[0]);
+  });
+
+  it("returns the first package if no match is found and list is not empty", () => {
+    const customPackages = [DEFAULT_PACKAGES[2], DEFAULT_PACKAGES[1]];
+    // Sort order: matchday-pro (20) < season-ops (30)
+    expect(resolvePackageById("non-existent", customPackages).id).toBe(DEFAULT_PACKAGES[1].id);
+  });
+
+  it("handles BDT currency formatting properly", () => {
+    expect(formatPackagePrice({ amountCents: 10000, currency: "bdt" })).toBe("৳100");
+    expect(formatPackagePrice({ amountCents: 10050, currency: "bdt" })).toBe("৳101"); // Rounds up
+  });
 });
