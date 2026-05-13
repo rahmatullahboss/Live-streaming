@@ -223,95 +223,95 @@ const studioCopy: Record<
   }
 > = {
   en: {
-    adMode: "অ্যাড মোড",
-    adPromo: "অ্যাড / প্রোমো",
-    adTitle: "অ্যাডের শিরোনাম",
-    adVideoUpload: "অ্যাড ভিডিও আপলোড",
-    adVideoSlots: "আপলোড করা অ্যাড",
-    adVideoUrl: "অ্যাড ভিডিও URL",
-    audioOff: "অডিও বন্ধ",
-    audioOn: "অডিও চালু",
-    bat: "ব্যাটিং",
-    bowl: "বোলিং",
-    cameraPool: "ক্যামেরা পুল",
-    cameras: "ক্যামেরা",
-    chooseFile: "ফাইল বাছুন",
-    connected: "সংযুক্ত",
-    copyLink: "লিঙ্ক কপি করুন",
-    crr: "রান রেট",
-    dashboard: "ড্যাশবোর্ড",
-    directorAccess: "ডিরেক্টর অ্যাক্সেস",
-    directorControls: "ডিরেক্টর কন্ট্রোল",
-    enterStudio: "স্টুডিওতে ঢুকুন",
-    externalOverlay: "এক্সটার্নাল ওভারলে",
-    externalOverlayHelp: "স্কোরিং বা গ্রাফিক্স ওয়েবসাইটের overlay URL দিন। আপাতত এটি শুধু এই ওয়েবসাইটের প্রিভিউ/প্লেয়ারের উপর iframe হিসেবে দেখা যাবে।",
-    externalOverlayOff: "ওভারলে বন্ধ",
-    externalOverlayOn: "ওভারলে চালু",
-    goLive: "লাইভ শুরু",
-    graphics: "গ্রাফিক্স ও মেট্রিক্স",
-    graphicsHelp: "লোগো, স্পন্সর, অ্যাড ভিডিও, চলন্ত বার্তা এবং এক্সটার্নাল ওভারলে নিয়ন্ত্রণ করুন।",
-    hideVideo: "ভিডিও লুকান",
-    home: "হোম",
-    inn: "ইনিংস",
-    leftLogo: "বাম লোগো",
-    live: "লাইভ",
-    liveCameras: "লাইভ ক্যামেরা",
-    loadingSettings: "রুম সেটিংস লোড হচ্ছে...",
-    matchStatus: "ম্যাচ স্ট্যাটাস",
-    monitorAudioOff: "মনিটর অডিও বন্ধ",
-    monitorAudioOn: "মনিটর অডিও চালু",
-    monitorVolume: "মনিটর ভলিউম",
-    muteMic: "মাইক বন্ধ",
-    noCamera: "এখনও কোনো ফোন ক্যামেরা যুক্ত হয়নি। একই PIN দিয়ে ফোনে /camera খুলুন।",
-    noSignal: "সিগন্যাল নেই / ক্যামেরার জন্য অপেক্ষা করা হচ্ছে",
-    off: "বন্ধ",
-    on: "চালু",
-    onAir: "অন এয়ার",
-    openCommandRoom: "কমান্ড রুম খুলুন।",
-    ov: "ওভার",
-    pauseRoom: "রুম পজ করুন",
+    adMode: " ",
+    adPromo: " / ",
+    adTitle: " ",
+    adVideoUpload: "  ",
+    adVideoSlots: "  ",
+    adVideoUrl: "  URL",
+    audioOff: " ",
+    audioOn: " ",
+    bat: "",
+    bowl: "",
+    cameraPool: " ",
+    cameras: "",
+    chooseFile: " ",
+    connected: "",
+    copyLink: "  ",
+    crr: " ",
+    dashboard: "",
+    directorAccess: " ",
+    directorControls: " ",
+    enterStudio: " ",
+    externalOverlay: " ",
+    externalOverlayHelp: "    overlay URL ।      /  iframe   ।",
+    externalOverlayOff: " ",
+    externalOverlayOn: " ",
+    goLive: " ",
+    graphics: "  ",
+    graphicsHelp: ", ,  ,       ।",
+    hideVideo: " ",
+    home: "",
+    inn: "",
+    leftLogo: " ",
+    live: "",
+    liveCameras: " ",
+    loadingSettings: "   ...",
+    matchStatus: " ",
+    monitorAudioOff: "  ",
+    monitorAudioOn: "  ",
+    monitorVolume: " ",
+    muteMic: " ",
+    noCamera: "     ।  PIN   /camera ।",
+    noSignal: "  /     ",
+    off: "",
+    on: "",
+    onAir: " ",
+    openCommandRoom: "  ।",
+    ov: "",
+    pauseRoom: "  ",
     pin: "PIN",
-    presentedBy: "স্পন্সরড বাই",
-    programSource: "প্রোগ্রাম সোর্স",
-    ptn: "পার্টনারশিপ",
-    pullFailed: "লোড ব্যর্থ হয়েছে",
-    pullingSfu: "ক্যামেরা লোড হচ্ছে",
-    refresh: "রিফ্রেশ",
-    relay: "VPS রিলে",
-    relayHelp: "ব্রাউজার মিক্সার থেকে managed RTMP রিলে।",
-    remove: "রিমুভ",
-    restartRelay: "রিলে পুনরায় শুরু করুন",
-    resumeRoom: "রুম রিজিউম করুন",
-    rightLogo: "ডান লোগো",
-    roomRequired: "ড্যাশবোর্ডের নির্দিষ্ট রুম থেকে স্টুডিও খুলুন।",
-    roomPaused: "রুম পজ করা আছে",
-    roomStatus: "রুম স্ট্যাটাস",
-    rrr: "প্রয়োজনীয় রেট",
-    runs: "রান",
-    save: "সেভ",
-    saveGraphics: "গ্রাফিক্স সেভ",
-    showVideo: "ভিডিও দেখান",
-    sponsor: "স্পন্সর",
-    starting: "শুরু হচ্ছে...",
-    stopRelay: "রিলে বন্ধ",
-    studioEyebrow: "SFU ডিরেক্টর স্টুডিও",
-    studioHelp: "Cloudflare SFU ক্যামেরা ফিড টানুন, প্রোগ্রাম সুইচ করুন, গ্রাফিক্স চালান, তারপর রিলেতে পাঠান।",
-    takeAdLive: "অ্যাড লাইভ নিন",
-    takeLive: "লাইভ নিন",
-    target: "টার্গেট",
-    team1Logo: "টিম ১ লোগো",
-    team2Logo: "টিম ২ লোগো",
-    teamLogo: "টিম লোগো (স্কোরকার্ড)",
-    ticker: "চলন্ত বার্তা",
-    tickerOff: "বার্তা বন্ধ",
-    tickerOn: "বার্তা চালু",
-    timeLeft: "মিনিট বাকি",
-    unmuteMic: "মাইক চালু",
-    update: "আপডেট",
-    uploadLogo: "লোগো আপলোড",
-    videoOff: "ভিডিও বন্ধ",
-    videoOn: "ভিডিও চালু",
-    wickets: "উইকেট",
+    presentedBy: " ",
+    programSource: " ",
+    ptn: "",
+    pullFailed: "  ",
+    pullingSfu: "  ",
+    refresh: "",
+    relay: "VPS ",
+    relayHelp: "   managed RTMP ।",
+    remove: "",
+    restartRelay: "   ",
+    resumeRoom: "  ",
+    rightLogo: " ",
+    roomRequired: "     ।",
+    roomPaused: "   ",
+    roomStatus: " ",
+    rrr: " ",
+    runs: "",
+    save: "",
+    saveGraphics: " ",
+    showVideo: " ",
+    sponsor: "",
+    starting: " ...",
+    stopRelay: " ",
+    studioEyebrow: "SFU  ",
+    studioHelp: "Cloudflare SFU   ,   ,  ,   ।",
+    takeAdLive: "  ",
+    takeLive: " ",
+    target: "",
+    team1Logo: "  ",
+    team2Logo: "  ",
+    teamLogo: "  ()",
+    ticker: " ",
+    tickerOff: " ",
+    tickerOn: " ",
+    timeLeft: " ",
+    unmuteMic: " ",
+    update: "",
+    uploadLogo: " ",
+    videoOff: " ",
+    videoOn: " ",
+    wickets: "",
   },
   en: {
     adMode: "Ad Mode",
@@ -1107,12 +1107,12 @@ export default function DirectorStudio() {
   async function handleAdVideoUpload(file: File) {
     const MAX_VIDEO_SIZE = 250_000_000;
     if (file.size > MAX_VIDEO_SIZE) {
-      setAssetError(`ভিডিও ফাইল ${Math.round(file.size / 1_000_000)}MB — সর্বোচ্চ 250MB অনুমোদিত।`);
+      setAssetError(`  ${Math.round(file.size / 1_000_000)}MB —  250MB ।`);
       return;
     }
 
     if (!file.type.startsWith("video/")) {
-      setAssetError("শুধুমাত্র ভিডিও ফাইল (MP4, WebM, MOV) আপলোড করুন।");
+      setAssetError("   (MP4, WebM, MOV)  ।");
       return;
     }
 
@@ -3045,7 +3045,7 @@ function GraphicsPanel({
                 Score Control Link
               </p>
               <p className="mt-2 text-sm text-[var(--text-muted)]">
-                এই লিঙ্কটি স্কোরারের সাথে শেয়ার করুন। সেখান থেকে আপডেট করা স্কোর সরাসরি ব্রডকাস্টে দেখা যাবে।
+                     ।         ।
               </p>
             </div>
             <ToggleChip
@@ -3073,7 +3073,7 @@ function GraphicsPanel({
                 className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-main)]"
               >
                 <ExternalLink size={14} />
-                খুলুন
+                
               </a>
             ) : null}
           </div>
@@ -3088,7 +3088,7 @@ function GraphicsPanel({
             value={overlay.ticker_text ?? ""}
             onChange={(event) => onOverlayChange("ticker_text", event.target.value)}
             className="min-h-24 w-full rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-3 text-sm text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
-            placeholder="ব্রেকিং আপডেট · খেলা শুরু ১০ মিনিটে · স্পন্সরড বাই ..."
+            placeholder="  ·     ·   ..."
           />
         </label>
 
@@ -3260,7 +3260,7 @@ function AdVideoUploadControl({
       {uploadProgress !== null && uploadProgress >= 0 ? (
         <div className="mt-3 space-y-1">
           <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
-            <span>আপলোড হচ্ছে...</span>
+            <span> ...</span>
             <span>{uploadProgress}%</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-black/30">

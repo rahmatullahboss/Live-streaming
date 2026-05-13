@@ -65,7 +65,7 @@ export default function WatchPage() {
     try {
       await loadRoomState(pin);
     } catch (lookupError: unknown) {
-      setError(lookupError instanceof Error ? lookupError.message : "লাইভ রুম খুঁজে পাওয়া যায়নি");
+      setError(lookupError instanceof Error ? lookupError.message : "    ");
       setRoom(null);
     } finally {
       setLoading(false);
@@ -130,13 +130,13 @@ export default function WatchPage() {
         <div>
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent-cyan)]">
             <RadioTower size={14} />
-            ভিউয়ার এক্সেস
+             
           </div>
           <h1 data-display className="text-4xl font-bold tracking-tight text-[var(--text-main)]">
-            লাইভ প্রোগ্রাম দেখুন।
+              ।
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--text-muted)]">
-            রুম লোড করুন এবং টিভি-স্টাইল ওভারলে সহ লাইভ খেলা উপভোগ করুন।
+                -      ।
           </p>
         </div>
 
@@ -147,7 +147,7 @@ export default function WatchPage() {
           className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-semibold text-[var(--text-main)] disabled:opacity-50"
         >
           {refreshing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCcw size={16} />}
-          রিফ্রেশ করুন
+           
         </button>
       </section>
 
@@ -156,7 +156,7 @@ export default function WatchPage() {
           <form onSubmit={handleLookup} className="space-y-4">
             <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                রুম পিন
+                 
               </span>
               <input
                 type="text"
@@ -174,7 +174,7 @@ export default function WatchPage() {
               className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-5 py-4 text-sm font-semibold text-[#041016] disabled:opacity-60"
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : <PlayCircle size={18} />}
-              প্লেব্যাক লোড করুন
+                
             </button>
           </form>
 
@@ -188,28 +188,28 @@ export default function WatchPage() {
             <div className="mt-4 space-y-4">
               <div className="rounded-[1.5rem] border border-[var(--border-soft)] bg-black/15 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                  রুম
+                  
                 </p>
                 <p className="mt-2 text-lg font-semibold text-[var(--text-main)]">{room.name}</p>
-                <p className="mt-3 text-xs text-[var(--text-muted)]">প্লেব্যাক লিঙ্ক</p>
+                <p className="mt-3 text-xs text-[var(--text-muted)]"> </p>
                 <p className="mt-2 break-all text-sm text-[var(--accent-cyan)]">
-                  {playbackUrl ?? "এখনো কোনো প্লেব্যাক লিঙ্ক যোগ করা হয়নি।"}
+                  {playbackUrl ?? "      ।"}
                 </p>
               </div>
 
               <div className="rounded-[1.5rem] border border-[var(--border-soft)] bg-black/15 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                  অন এয়ার
+                   
                 </p>
                 <p className="mt-2 text-lg font-semibold text-[var(--text-main)]">
-                  {showAd ? overlay.ad_title || "বিজ্ঞাপন বিরতি" : "লাইভ ম্যাচ ফিড"}
+                  {showAd ? overlay.ad_title || " " : "  "}
                 </p>
                 <p className="mt-3 text-sm text-[var(--text-muted)]">
                   {overlay.external_overlay_active === 1 && overlay.external_scoreboard_url?.trim()
-                    ? "এই রুমের জন্য এক্সটারনাল স্কোর ওভারলে চালু আছে।"
+                    ? "       ।"
                     : overlay.scoreboard_active === 1
-                    ? "এই রুমের জন্য স্কোর ওভারলে চালু আছে।"
-                    : "স্কোর ওভারলে বর্তমানে বন্ধ আছে।"}
+                    ? "      ।"
+                    : "    ।"}
                 </p>
               </div>
             </div>
@@ -235,14 +235,14 @@ export default function WatchPage() {
               <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 bg-gradient-to-b from-black/65 to-transparent px-4 py-4">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--accent-cyan)]">
-                    লাইভ ভিউয়ার
+                     
                   </p>
                   <p className="text-sm font-semibold text-[var(--text-main)]">
                     {room?.name ?? "Cloudflare Playback"}
                   </p>
                 </div>
                 <div className="rounded-full border border-white/12 bg-black/30 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--accent-lime)]">
-                  লাইভ
+                  
                 </div>
               </div>
 
@@ -260,10 +260,10 @@ export default function WatchPage() {
               <div>
                 <ShieldAlert className="mx-auto text-[var(--accent-lime)]" size={28} />
                 <p className="mt-4 text-lg font-semibold text-[var(--text-main)]">
-                  কোনো প্লেব্যাক লোড হয়নি
+                     
                 </p>
                 <p className="mt-2 text-sm text-[var(--text-muted)]">
-                  সঠিক রুম পিন দিন। রুমটি চালু থাকলে এখানে লাইভ প্লেব্যাক এবং ওভারলে দেখা যাবে।
+                     ।          ।
                 </p>
               </div>
             </div>

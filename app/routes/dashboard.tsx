@@ -65,7 +65,7 @@ function StatusBadge({ status, expiresAt }: { status: string; expiresAt?: string
   if (isExpired) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-coral)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--accent-coral)]">
-        মেয়াদ উত্তীর্ণ
+         
       </span>
     );
   }
@@ -79,7 +79,7 @@ function StatusBadge({ status, expiresAt }: { status: string; expiresAt?: string
   if (status === "pending_manual_review") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-yellow-500/15 px-2 py-0.5 text-xs font-semibold text-yellow-400">
-        পর্যবেক্ষণের অপেক্ষায়
+         
       </span>
     );
   }
@@ -120,8 +120,8 @@ function RoomCard({
   const isPaused = room.is_paused === 1;
   const expiryText = room.expires_at
     ? isExpired
-      ? `মেয়াদ শেষ হয়েছে ${new Date(room.expires_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`
-      : `মেয়াদ আছে ${new Date(room.expires_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`
+      ? `   ${new Date(room.expires_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`
+      : `  ${new Date(room.expires_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`
     : "Timer starts when studio opens";
 
   return (
@@ -174,7 +174,7 @@ function RoomCard({
               : "border-[var(--border-soft)] text-[var(--text-main)]"
           }`}
         >
-          <Camera size={14} /> ক্যামেরা জয়েন
+          <Camera size={14} />  
         </Link>
         <Link
           to={`/watch?pin=${room.pin}`}
@@ -216,14 +216,14 @@ function RoomCard({
             onClick={onResume}
             className="inline-flex items-center gap-2 rounded-full border border-[var(--accent-lime)]/40 px-4 py-2 text-sm font-semibold text-[var(--accent-lime)] hover:bg-[var(--accent-lime)]/10"
           >
-            <Play size={14} /> পুনরায় শুরু করুন
+            <Play size={14} />   
           </button>
         )}
         {!isExpired && onClose && (
           <button
             type="button"
             onClick={() => {
-              if (window.confirm("আপনি কি এই রুমটি বন্ধ করতে চান? লাইভ স্ট্রিমিং সাথে সাথে বন্ধ হয়ে যাবে।")) {
+              if (window.confirm("      ?       ।")) {
                 onClose();
               }
             }}
@@ -332,7 +332,7 @@ export default function Dashboard() {
         roomName: roomName.trim() || "Live Match Room",
       });
 
-      setPurchaseNotice("পেমেন্ট সফলভাবে সাবমিট হয়েছে। অ্যাডমিন অ্যাপ্রুভ করলে আপনার অ্যাকাউন্টে সময় যোগ হবে।");
+      setPurchaseNotice("   ।        ।");
       setBkashSenderNumber("");
       setBkashTransactionId("");
       setRoomName("");
@@ -597,9 +597,9 @@ export default function Dashboard() {
                 <p className="mt-1 text-xs text-[var(--text-muted)]">{entitlements.maxRooms}max</p>
               </div>
               <div className="rounded-[1rem] border border-[var(--accent-lime)]/30 bg-[var(--accent-lime)]/5 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--accent-lime)]">অবশিষ্ট সময়</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--accent-lime)]"> </p>
                 <p className="mt-1 text-2xl font-bold text-[var(--accent-lime)]">{Math.floor(entitlements.remainingSeconds / 60)}min</p>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">{Math.floor(entitlements.usedSeconds / 60)}min ব্যবহৃত ({entitlements.totalMinutes}minের মধ্যে)</p>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">{Math.floor(entitlements.usedSeconds / 60)}min  ({entitlements.totalMinutes}min )</p>
               </div>
             </div>
             <div className="mt-4 flex gap-3">
@@ -661,7 +661,7 @@ export default function Dashboard() {
             <div className="space-y-4">
               {activeRooms.length === 0 ? (
                 <div className="rounded-[1.5rem] border border-dashed border-[var(--border-soft)] px-4 py-12 text-center">
-                  <p className="text-sm text-[var(--text-muted)]">কোন Active রুম নেই।</p>
+                  <p className="text-sm text-[var(--text-muted)]"> Active  ।</p>
                   <button
                     onClick={() => setShowCreateRoomModal(true)}
                     className="mt-4 inline-flex items-center gap-2 rounded-full bg-[var(--accent-lime)] px-4 py-2 text-sm font-semibold text-[#041016]"
@@ -695,7 +695,7 @@ export default function Dashboard() {
             <div className="space-y-4">
               {archiveRooms.length === 0 ? (
                 <div className="rounded-[1.5rem] border border-dashed border-[var(--border-soft)] px-4 py-12 text-center">
-                  <p className="text-sm text-[var(--text-muted)]">কোন Archive রুম নেই।</p>
+                  <p className="text-sm text-[var(--text-muted)]"> Archive  ।</p>
                 </div>
               ) : (
                 <>
@@ -735,11 +735,11 @@ export default function Dashboard() {
                             <Clock3 size={10} /> {purchase.durationMinutes} min
                           </span>
                           <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-lime)]/10 px-2 py-0.5 text-xs text-[var(--accent-lime)]">
-                            <Video size={10} /> {purchase.maxRooms}টি রুম
+                            <Video size={10} /> {purchase.maxRooms} 
                           </span>
                         </div>
                         <p className="mt-2 text-xs text-[var(--text-muted)]">
-                          Status: <span className={purchase.status === "paid" ? "text-[var(--accent-lime)]" : "text-yellow-400"}>{purchase.status === "paid" ? "Active" : purchase.status === "pending_manual_review" ? "পর্যবেক্ষণের অপেক্ষায়" : purchase.status}</span>
+                          Status: <span className={purchase.status === "paid" ? "text-[var(--accent-lime)]" : "text-yellow-400"}>{purchase.status === "paid" ? "Active" : purchase.status === "pending_manual_review" ? " " : purchase.status}</span>
                         </p>
                       </div>
                     </div>
@@ -747,7 +747,7 @@ export default function Dashboard() {
                   <div className="mt-4 flex items-start gap-2 rounded-xl border border-[var(--border-soft)] bg-black/10 px-3 py-2">
                     <Info size={14} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />
                     <p className="text-xs text-[var(--text-muted)]">
-                      প্রতিটি প্যাকেজ কিনলে আপনার অ্যাকাউন্টে সময় এবং রুম লিমিট যোগ হবে। সকল রুম একই টাইম বাজেট শেয়ার করে।
+                                ।       ।
                     </p>
                   </div>
                 </div>
@@ -762,7 +762,7 @@ export default function Dashboard() {
                 onClick={() => setCurrentPage(p => p - 1)}
                 className="rounded-full border border-[var(--border-soft)] p-2 text-[var(--text-main)] disabled:opacity-30"
               >
-                আগে
+                
               </button>
               {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
                 <button
@@ -782,7 +782,7 @@ export default function Dashboard() {
                 onClick={() => setCurrentPage(p => p + 1)}
                 className="rounded-full border border-[var(--border-soft)] p-2 text-[var(--text-main)] disabled:opacity-30"
               >
-                পরে
+                
               </button>
             </div>
           )}

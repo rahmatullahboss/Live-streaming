@@ -447,7 +447,7 @@ export default function Home() {
         <section id="features" className="py-32 px-6">
           <div className="max-w-7xl mx-auto">
             <div className="text-center mb-20">
-              <h2 className="text-4xl md:text-5xl font-black mb-6">আপনার যা প্রয়োজন সবকিছুই এক লিঙ্কে।</h2>
+              <h2 className="text-4xl md:text-5xl font-black mb-6">     ।</h2>
               <p className="text-[var(--text-muted)] max-w-xl mx-auto">
                 No expensive cameras or heavy software needed. Just your phone and willingness.
               </p>
@@ -469,12 +469,12 @@ export default function Home() {
               <FeatureCard 
                 icon={<Zap size={32} />}
                 title="Ultra-Low Latency"
-                description="কোন ল্যাগ ছাড়াই স্ট্রিমিং। মাঠে যা ঘটছে দর্শক ঠিক সেই মুহূর্তেই দেখতে পাবে।"
+                description="   ।         ।"
                 color="var(--accent-coral)"
               />
               <FeatureCard 
                 icon={<Globe size={32} />}
-                title="যেকোনো জায়গায় ব্রডকাস্ট"
+                title="  "
                 description="Go live directly on Facebook, YouTube, or our high-speed platform."
                 color="var(--accent-cyan)"
               />
@@ -509,13 +509,13 @@ export default function Home() {
               <Step 
                 number="01" 
                 title="Choose a plan" 
-                description="আপনার প্রয়োজন অনুযায়ী প্ল্যান বেছে নিন। বিকাশ বা ক্রেডিট কার্ড দিয়ে পেমেন্ট করা যাবে।"
+                description="     ।        ।"
                 icon={<CreditCard className="text-[var(--accent-cyan)]" size={32} />}
               />
               <Step 
                 number="02" 
                 title="Sync devices" 
-                description="ল্যাপটপে আপনার স্টুডিও লিঙ্কটি ওপেন করুন এবং স্মার্টফোন দিয়ে কিউআর কোড স্ক্যান করুন।"
+                description="            ।"
                 icon={<Smartphone className="text-[var(--accent-lime)]" size={32} />}
               />
               <Step 
@@ -535,7 +535,7 @@ export default function Home() {
                <div className="mb-12">
                  <h2 className="text-4xl md:text-6xl font-black mb-8 leading-[0.9]">Are you <br/> <span className="text-[var(--accent-cyan)]">ready?</span></h2>
                  <p className="text-[var(--text-muted)] max-w-md">
-                   আপনার প্রোডাকশন সাইজ অনুযায়ী প্ল্যান বেছে নিন। প্রতিটি প্ল্যানে আমাদের ৮কে মাল্টি-ক্যাম স্টুডিও এবং প্রো ওভারলে অন্তর্ভুক্ত।
+                         ।          ।
                  </p>
                </div>
 
@@ -554,7 +554,7 @@ export default function Home() {
                        <p className="text-xs text-[var(--text-muted)] mb-6 line-clamp-2">{item.description}</p>
                        
                        <div className="flex items-baseline gap-1 mb-6">
-                         <span className="text-3xl font-black">৳{item.price_cents / 100}</span>
+                         <span className="text-3xl font-black">{item.price_cents / 100}</span>
                          <span className="text-[10px] text-[var(--text-muted)] uppercase font-bold tracking-widest">/ match</span>
                        </div>
 
@@ -577,9 +577,9 @@ export default function Home() {
                   <div className="w-16 h-16 bg-[var(--accent-cyan)]/10 rounded-full flex items-center justify-center mx-auto mb-6">
                     <Zap className="text-[var(--accent-cyan)]" size={32} />
                   </div>
-                  <h3 className="text-2xl font-bold mb-4">লাইভ যাওয়ার জন্য ready?</h3>
+                  <h3 className="text-2xl font-bold mb-4">   ready?</h3>
                   <p className="text-sm text-[var(--text-muted)] mb-8">
-                    আপনার অ্যাকাউন্ট তৈরি করুন এবং কয়েক মিনিটের মধ্যেই প্রথম প্রফেশনাল ব্রডকাস্ট শুরু করুন।
+                                ।
                   </p>
                   
                   <Link 
@@ -615,7 +615,7 @@ export default function Home() {
                     role="Sports Coordinator"
                  />
                  <TestimonialCard 
-                    quote="শুধু ফোন দিয়েই ৩টি ক্যামেরা সেটআপ করা অবাক করার মতো সহজ ছিল। কোন ল্যাগ নেই।"
+                    quote="           ।   ।"
                     author="Tanvir Hossain"
                     role="Live Streamer"
                  />
@@ -626,23 +626,23 @@ export default function Home() {
         {/* FAQ Section */}
         <section className="py-32 px-6 bg-black/20">
            <div className="max-w-3xl mx-auto">
-              <h2 className="text-4xl font-black mb-12 text-center tracking-tight">সাধারণ কিছু <span className="text-[var(--accent-cyan)]">জিজ্ঞাসা।</span></h2>
+              <h2 className="text-4xl font-black mb-12 text-center tracking-tight"> <span className="text-[var(--accent-cyan)]"></span></h2>
               <div className="space-y-6">
                  <FAQItem 
                     question="Do I need any special equipment?"
-                    answer="না। আপনার শুধু একটি ল্যাপটপ (স্টুডিওর জন্য) এবং অন্তত একটি স্মার্টফোন প্রয়োজন। মাল্টি-ক্যাম সেটআপের জন্য ৫টি পর্যন্ত স্মার্টফোন সিঙ্ক করা যায়।"
+                    answer="।     ( )     ।        ।"
                  />
                  <FAQItem 
-                    question="আমি কোথায় আমার ম্যাচগুলো স্ট্রিম করতে পারি?"
+                    question="      ?"
                     answer="You can stream directly on Facebook, YouTube, or our optimized platform."
                  />
                  <FAQItem 
-                    question="৮কে কোয়ালিটি কি সত্যিই কাজ করে?"
+                    question="     ?"
                     answer="Yes, if your smartphone supports 4K recording and you have a stable high-speed internet connection."
                  />
                  <FAQItem 
                     question="Can I record my matches?"
-                    answer="হ্যাঁ! প্রতিটি স্ট্রিম স্বয়ংক্রিয়ভাবে আর্কাইভ হয়ে যায় এবং পরবর্তীতে দেখার জন্য আপনার ড্যাশবোর্ড থেকে ডাউনলোড করা যায়।"
+                    answer="!                ।"
                  />
                  <FAQItem 
                     question="What sports are supported?"

@@ -43,11 +43,11 @@ function getLockableScreenOrientation(): LockableScreenOrientation | null {
 export default function CameraPublisher() {
   const [searchParams] = useSearchParams();
   const [pin, setPin] = useState(searchParams.get("pin") ?? "");
-  const [operatorName, setOperatorName] = useState("ফিল্ড ক্যামেরা");
+  const [operatorName, setOperatorName] = useState(" ");
   const [session, setSession] = useState<CameraSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string>("অপেক্ষমান");
+  const [notice, setNotice] = useState<string>("");
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [isLandscape, setIsLandscape] = useState(false);
@@ -80,7 +80,7 @@ export default function CameraPublisher() {
 
     heartbeatRef.current = window.setInterval(() => {
       void heartbeatRoomCamera(session.room.id, session.cameraId).catch(() => {
-        setNotice("হার্টবিট পুনরায় চেষ্টা করা হচ্ছে");
+        setNotice("    ");
       });
     }, 20_000);
 
@@ -170,7 +170,7 @@ export default function CameraPublisher() {
       }
 
       rotationBusyRef.current = true;
-      setNotice(landscape ? "ল্যান্ডস্কেপ মোডে সুইচ হচ্ছে" : "পোর্ট্রেট মোডে সুইচ হচ্ছে");
+      setNotice(landscape ? "   " : "   ");
 
       const oldTrack = activeSession.stream.getVideoTracks()[0];
 
@@ -227,11 +227,11 @@ export default function CameraPublisher() {
           }
         }
 
-        setNotice(landscape ? "ল্যান্ডস্কেপ মোড" : "পোর্ট্রেট মোড");
+        setNotice(landscape ? " " : " ");
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "ওরিয়েন্টেশন সুইচ ব্যর্থ হয়েছে");
-        setNotice("পুনরায় চেষ্টা করা হচ্ছে");
+        setError(err instanceof Error ? err.message : "   ");
+        setNotice("   ");
       } finally {
         rotationBusyRef.current = false;
       }
@@ -254,7 +254,7 @@ export default function CameraPublisher() {
         setIsLandscape(false);
         isLandscapeRef.current = false;
         setCurrentOrientation("portrait");
-        setNotice("পোর্ট্রেট মোড");
+        setNotice(" ");
       }
     }
 
@@ -277,13 +277,13 @@ export default function CameraPublisher() {
     event.preventDefault();
     setLoading(true);
     setError(null);
-    setNotice("রুম চেক করা হচ্ছে");
+    setNotice("   ");
 
     try {
       const room = await verifyRoomPin(pin.trim());
       const cameraId = createCameraId();
       const trackNames = buildCameraTrackNames(cameraId);
-      setNotice("ক্যামেরা চালু হচ্ছে");
+      setNotice("  ");
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -304,7 +304,7 @@ export default function CameraPublisher() {
         throw new Error("No camera track was returned by this device.");
       }
 
-      setNotice("Cloudflare SFU-তে পাবলিশ হচ্ছে");
+      setNotice("Cloudflare SFU-  ");
       await client.publishTracks([
         { track: videoTrack, trackName: trackNames.videoTrackName },
         ...(audioTrack ? [{ track: audioTrack, trackName: trackNames.audioTrackName }] : []),
@@ -325,10 +325,10 @@ export default function CameraPublisher() {
       setSession({ cameraId, client, room, stream });
       setAudioEnabled(audioTrack ? audioTrack.enabled : false);
       setVideoEnabled(videoTrack.enabled);
-      setNotice("সিগন্যাল পাঠানো হচ্ছে");
+      setNotice("  ");
     } catch (joinError: unknown) {
-      setError(joinError instanceof Error ? joinError.message : "ক্যামেরা পাবলিশ করা সম্ভব হয়নি");
-      setNotice("ব্যর্থ হয়েছে");
+      setError(joinError instanceof Error ? joinError.message : "    ");
+      setNotice(" ");
     } finally {
       setLoading(false);
     }
@@ -339,14 +339,14 @@ export default function CameraPublisher() {
       return;
     }
 
-    setNotice("বিচ্ছিন্ন করা হচ্ছে");
+    setNotice("  ");
     const currentSession = session;
     setSession(null);
 
     currentSession.stream.getTracks().forEach((track) => track.stop());
     currentSession.client.close();
     await removeRoomCamera(currentSession.room.id, currentSession.cameraId).catch(() => undefined);
-    setNotice("অপেক্ষমান");
+    setNotice("");
   }
 
   function toggleAudio() {
@@ -378,7 +378,7 @@ export default function CameraPublisher() {
 
     rotationBusyRef.current = true;
     const targetLandscape = !isLandscape;
-    setNotice(targetLandscape ? "ল্যান্ডস্কেপ মোডে সুইচ হচ্ছে" : "পোর্ট্রেট মোডে সুইচ হচ্ছে");
+    setNotice(targetLandscape ? "   " : "   ");
 
     // Set manual override so auto-rotation doesn't fight this.
     manualOverrideRef.current = targetLandscape;
@@ -454,13 +454,13 @@ export default function CameraPublisher() {
         }
       }
 
-      setNotice(targetLandscape ? "ল্যান্ডস্কেপ মোড চালু" : "পোর্ট্রেট মোড চালু");
+      setNotice(targetLandscape ? "  " : "  ");
       setError(null);
     } catch (err) {
       // Recovery: re-acquire the camera since we already stopped the old track.
       manualOverrideRef.current = false;
-      setError(err instanceof Error ? err.message : "ওরিয়েন্টেশন সুইচ করতে ব্যর্থ হয়েছে");
-      setNotice("ক্যামেরা রিকভার করা হচ্ছে");
+      setError(err instanceof Error ? err.message : "    ");
+      setNotice("   ");
 
       try {
         const recoveryStream = await navigator.mediaDevices.getUserMedia({
@@ -481,9 +481,9 @@ export default function CameraPublisher() {
         }
 
         setSession((prev) => prev ? { ...prev, stream: recoveryStream } : null);
-        setNotice("রোটেশন ব্যর্থ - ক্যামেরা রিকভার করা হয়েছে");
+        setNotice("  -    ");
       } catch {
-        setNotice("ক্যামেরা বিচ্ছিন্ন হয়েছে - পুনরায় জয়েন করুন");
+        setNotice("   -   ");
       }
     } finally {
       rotationBusyRef.current = false;
@@ -498,13 +498,13 @@ export default function CameraPublisher() {
             <div>
               <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent-lime)]">
                 <Signal size={14} />
-                SFU ক্যামেরা আপলিঙ্ক
+                SFU  
               </div>
               <h1 data-display className="text-4xl font-bold tracking-tight text-[var(--text-main)]">
-                লাইভ রুমে যোগ দিন।
+                   ।
               </h1>
               <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
-                এই ফোন থেকে ভিডিও এবং অডিও সরাসরি Cloudflare Realtime SFU-তে পাঠানো হবে।
+                       Cloudflare Realtime SFU-  ।
               </p>
             </div>
             <div className="rounded-full bg-[var(--accent-cyan)]/12 p-4 text-[var(--accent-cyan)]">
@@ -514,15 +514,15 @@ export default function CameraPublisher() {
 
           <form onSubmit={handleJoin} className="space-y-4">
             <InputField
-              label="রুম পিন (PIN)"
+              label="  (PIN)"
               placeholder="123456"
               value={pin}
               tracking
               onChange={setPin}
             />
             <InputField
-              label="ক্যামেরা লেবেল"
-              placeholder="উত্তর গোল ক্যামেরা"
+              label=" "
+              placeholder="  "
               value={operatorName}
               onChange={setOperatorName}
             />
@@ -534,7 +534,7 @@ export default function CameraPublisher() {
               className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent-coral)] px-5 py-4 text-sm font-semibold text-white hover:scale-[1.01] disabled:opacity-60"
             >
               {loading ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
-              {loading ? notice : "ক্যামেরা কানেক্ট করুন"}
+              {loading ? notice : "  "}
             </button>
           </form>
         </section>
@@ -559,7 +559,7 @@ export default function CameraPublisher() {
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
             <div className="text-center">
               <CameraOff className="mx-auto text-white/75" size={28} />
-              <p className="mt-3 text-sm font-medium text-white/85">ক্যামেরা বন্ধ করা আছে</p>
+              <p className="mt-3 text-sm font-medium text-white/85">   </p>
             </div>
           </div>
         ) : null}
@@ -588,25 +588,25 @@ export default function CameraPublisher() {
             <IconButton
               active={audioEnabled}
               icon={audioEnabled ? <Mic size={18} /> : <MicOff size={18} />}
-              label={audioEnabled ? "মাইক চালু" : "মাইক বন্ধ"}
+              label={audioEnabled ? " " : " "}
               onClick={toggleAudio}
             />
             <IconButton
               active={videoEnabled}
               icon={videoEnabled ? <Video size={18} /> : <CameraOff size={18} />}
-              label={videoEnabled ? "ক্যামেরা চালু" : "ক্যামেরা বন্ধ"}
+              label={videoEnabled ? " " : " "}
               onClick={toggleVideo}
             />
             <IconButton
               active={isLandscape}
               icon={<RotateCw size={18} />}
-              label="ঘুরান"
+              label=""
               onClick={() => void handleRotation()}
             />
             <IconButton
               active={false}
               icon={<PhoneOff size={18} />}
-              label="বাহির হন"
+              label=" "
               onClick={() => void disconnect()}
             />
           </div>
@@ -620,7 +620,7 @@ export default function CameraPublisher() {
       <header className="relative z-10 mb-3 flex items-center justify-between gap-4">
         <div className="glass-panel rounded-[1.6rem] px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent-lime)]">
-            লাইভ রুম
+             
           </p>
           <p className="text-sm text-[var(--text-main)]">
             {session.room.name} · {session.room.pin}
@@ -629,9 +629,9 @@ export default function CameraPublisher() {
 
         <div className="glass-panel rounded-[1.6rem] px-4 py-3 text-right">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-            ক্যামেরা
+            
           </p>
-          <p className="text-sm text-[var(--text-main)]">{operatorName || "ফিল্ড ক্যামেরা"}</p>
+          <p className="text-sm text-[var(--text-main)]">{operatorName || " "}</p>
         </div>
       </header>
 
@@ -642,7 +642,7 @@ export default function CameraPublisher() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-soft)] px-4 py-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent-cyan)]">
-                ফিল্ড ক্যামেরা
+                 
               </p>
               <h1 data-display className="text-2xl font-bold text-[var(--text-main)]">
                 {operatorName}
@@ -668,7 +668,7 @@ export default function CameraPublisher() {
               <div className="absolute inset-0 flex items-center justify-center bg-black/60">
                 <div className="text-center">
                   <CameraOff className="mx-auto text-white/75" size={28} />
-                  <p className="mt-3 text-sm font-medium text-white/85">ক্যামেরা বন্ধ করা আছে</p>
+                  <p className="mt-3 text-sm font-medium text-white/85">   </p>
                 </div>
               </div>
             ) : null}
@@ -676,35 +676,35 @@ export default function CameraPublisher() {
 
           <div className="grid gap-3 px-4 py-4 sm:grid-cols-[1fr_auto] sm:items-center">
             <div className="grid grid-cols-3 gap-3">
-              <MiniPanel label="ভিডিও" value={videoEnabled ? "চালু" : "বন্ধ"} />
-              <MiniPanel label="অডিও" value={audioEnabled ? "চালু" : "বন্ধ"} />
-              <MiniPanel label="SFU" value="লাইভ" />
-              <MiniPanel label="ওরিয়েন্টেশন" value={currentOrientation === "landscape" ? "ল্যান্ডস্কেপ" : "পোর্ট্রেট"} />
+              <MiniPanel label="" value={videoEnabled ? "" : ""} />
+              <MiniPanel label="" value={audioEnabled ? "" : ""} />
+              <MiniPanel label="SFU" value="" />
+              <MiniPanel label="" value={currentOrientation === "landscape" ? "" : ""} />
             </div>
 
             <div className="grid grid-cols-3 gap-3">
               <IconButton
                 active={audioEnabled}
                 icon={audioEnabled ? <Mic size={18} /> : <MicOff size={18} />}
-                label={audioEnabled ? "মাইক চালু" : "মাইক বন্ধ"}
+                label={audioEnabled ? " " : " "}
                 onClick={toggleAudio}
               />
               <IconButton
                 active={videoEnabled}
                 icon={videoEnabled ? <Video size={18} /> : <CameraOff size={18} />}
-                label={videoEnabled ? "ক্যামেরা চালু" : "ক্যামেরা বন্ধ"}
+                label={videoEnabled ? " " : " "}
                 onClick={toggleVideo}
               />
               <IconButton
                 active={false}
                 icon={<PhoneOff size={18} />}
-                label="বাহির হন"
+                label=" "
                 onClick={() => void disconnect()}
               />
               <IconButton
                 active={isLandscape}
                 icon={<RotateCw size={18} />}
-                label={isLandscape ? "ল্যান্ডস্কেপ" : "ঘুরান"}
+                label={isLandscape ? "" : ""}
                 onClick={() => void handleRotation()}
               />
             </div>
@@ -735,7 +735,7 @@ function InputField({
       </span>
       <input
         type="text"
-        required={label === "রুম পিন (PIN)"}
+        required={label === "  (PIN)"}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={`w-full rounded-2xl border border-[var(--border-soft)] bg-black/20 px-4 py-4 text-base text-[var(--text-main)] outline-none focus:border-[var(--border-strong)] ${

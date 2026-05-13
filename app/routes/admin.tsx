@@ -60,10 +60,10 @@ type AuditLogFilter = {
 
 export function meta(_: Route.MetaArgs) {
   return [
-    { title: "অ্যাডমিন | কাইনেটিক কমান্ড" },
+    { title: " | Kinetic Command" },
     {
       name: "description",
-      content: "প্যাকেজ, টেন্যান্ট, রুম এবং পেমেন্ট ম্যানেজমেন্ট অ্যাডমিন প্যানেল।",
+      content: "Packages, Tenants,      ।",
     },
   ];
 }
@@ -334,17 +334,17 @@ export default function AdminRoute() {
         <div>
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--accent-cyan)]/25 bg-[var(--accent-cyan)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent-cyan)]">
             <Shield size={14} />
-            অ্যাডমিন অপারেশন
+             Operations
           </div>
           <h1 data-display className="text-3xl font-bold text-[var(--text-main)] sm:text-4xl">
-            অপারেশন
+            Operations
           </h1>
         </div>
         <Link
           to="/"
           className="rounded-full border border-[var(--border-soft)] px-4 py-2 text-sm font-semibold text-[var(--text-main)]"
         >
-          হোম
+          
         </Link>
       </header>
 
@@ -353,7 +353,7 @@ export default function AdminRoute() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                লগইন করা আছে
+                logged in
               </p>
               <p className="mt-1 font-semibold text-[var(--text-main)]">{authenticatedEmail}</p>
             </div>
@@ -365,7 +365,7 @@ export default function AdminRoute() {
                 className="flex items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-5 py-3 text-sm font-semibold text-[#041016] disabled:opacity-60"
               >
                 {loading ? <Loader2 className="animate-spin" size={16} /> : <RefreshCcw size={16} />}
-                রিফ্রেশ
+                
               </button>
               <button
                 type="button"
@@ -373,7 +373,7 @@ export default function AdminRoute() {
                 disabled={loading}
                 className="rounded-full border border-[var(--border-soft)] px-5 py-3 text-sm font-semibold text-[var(--text-main)] disabled:opacity-60"
               >
-                লগআউট
+                
               </button>
             </div>
           </div>
@@ -381,7 +381,7 @@ export default function AdminRoute() {
           <form onSubmit={handleLogin} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                অ্যাডমিন ইমেইল
+                 Email
               </span>
               <input
                 type="email"
@@ -394,14 +394,14 @@ export default function AdminRoute() {
             </label>
             <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                পাসওয়ার্ড
+                Password
               </span>
               <input
                 type="password"
                 value={adminPassword}
                 onChange={(event) => setAdminPassword(event.target.value)}
                 className="w-full rounded-2xl border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-3 text-sm text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
-                placeholder="অ্যাডমিন পাসওয়ার্ড"
+                placeholder=" Password"
                 autoComplete="current-password"
               />
             </label>
@@ -411,7 +411,7 @@ export default function AdminRoute() {
               className="flex items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-5 py-3 text-sm font-semibold text-[#041016] disabled:opacity-60 md:self-end"
             >
               {loading ? <Loader2 className="animate-spin" size={16} /> : <Shield size={16} />}
-              লগইন
+              Login
             </button>
           </form>
         )}
@@ -427,9 +427,9 @@ export default function AdminRoute() {
       </section>
 
       {loading && !dashboard ? (
-        <StatePanel icon={<Loader2 className="animate-spin text-[var(--accent-cyan)]" size={28} />} text="অ্যাডমিন ডাটা লোড হচ্ছে..." />
+        <StatePanel icon={<Loader2 className="animate-spin text-[var(--accent-cyan)]" size={28} />} text=" Loading data..." />
       ) : !dashboard ? (
-        <StatePanel icon={<ShieldAlert className="text-[var(--accent-coral)]" size={28} />} text="অপারেশন ডাটা দেখার জন্য অ্যাডমিন ইমেইল এবং পাসওয়ার্ড দিয়ে লগইন করুন।" />
+        <StatePanel icon={<ShieldAlert className="text-[var(--accent-coral)]" size={28} />} text="Operations     Email  Password  Login ।" />
       ) : (
         <div className="space-y-5">
           <AdminTabBar active={adminTab} onChange={setAdminTab} />
@@ -437,18 +437,18 @@ export default function AdminRoute() {
           {/* ── Overview ── */}
           {adminTab === "overview" && (
             <>
-              <Panel title="রাজস্ব">
+              <Panel title="Revenue">
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <RevenueMetric label="MRR" valueCents={revenueStats.mrrCents} subtitle="মাসিক সম্ভাব্য আয়" />
-                  <RevenueMetric label="ARR" valueCents={revenueStats.arrCents} subtitle="বার্ষিক সম্ভাব্য আয়" />
-                  <RevenueMetric label="মোট রাজস্ব" valueCents={revenueStats.totalRevenueCents} subtitle="সর্বকালীন" />
+                  <RevenueMetric label="MRR" valueCents={revenueStats.mrrCents} subtitle="  " />
+                  <RevenueMetric label="ARR" valueCents={revenueStats.arrCents} subtitle="  " />
+                  <RevenueMetric label=" Revenue" valueCents={revenueStats.totalRevenueCents} subtitle="All-time" />
                   <div className="rounded-[1.25rem] border border-[var(--border-soft)] bg-black/15 p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                      পেমেন্ট মাধ্যম
+                      Payment method
                     </p>
                     <div className="mt-3 space-y-2">
                       {Object.keys(revenueStats.paymentMethodBreakdown).length === 0 ? (
-                        <p className="text-sm text-[var(--text-muted)]">কোনো পেমেন্ট নেই</p>
+                        <p className="text-sm text-[var(--text-muted)]">No payments yet</p>
                       ) : (
                         Object.entries(revenueStats.paymentMethodBreakdown).map(([method, cents]) => (
                           <div key={method} className="flex justify-between text-sm">
@@ -463,32 +463,32 @@ export default function AdminRoute() {
               </Panel>
 
               <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                <Metric label="টেন্যান্ট" value={String(dashboard.summary.tenants)} />
-                <Metric label="রুম" value={String(dashboard.summary.rooms)} />
+                <Metric label="Tenants" value={String(dashboard.summary.tenants)} />
+                <Metric label="" value={String(dashboard.summary.rooms)} />
                 <TrendingMetric
-                  label="সক্রিয় রুম"
+                  label=" "
                   value={dashboard.summary.activeRooms}
                   change={trendingMetrics?.activeRoomsChange ?? 0}
                 />
-                <Metric label="রিভিউ অপেক্ষমান" value={String(dashboard.summary.pendingManualReviews)} />
+                <Metric label="Pending reviews" value={String(dashboard.summary.pendingManualReviews)} />
                 <TrendingMetric
-                  label="পেইড পারচেজ"
+                  label="Paid purchases"
                   value={dashboard.summary.paidPurchases}
                   change={trendingMetrics?.paidPurchasesChange ?? 0}
                 />
               </section>
 
-              <Panel title="স্ট্রিমিং পরিসংখ্যান">
+              <Panel title="Streaming Statistics">
                 {streamingStats.totalStreams === 0 ? (
                   <div className="flex items-center justify-between rounded-[1.25rem] border border-dashed border-[var(--border-soft)] px-4 py-6 text-sm text-[var(--text-muted)]">
-                    <span>স্ট্রিমিং অ্যানালিটিক্স শীঘ্রই আসছে</span>
+                    <span>Streaming analytics coming soon</span>
                     <TrendingUp size={16} className="text-[var(--accent-cyan)]" />
                   </div>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <StreamingStatItem label="মোট স্ট্রিম" value={streamingStats.totalStreams} />
-                    <StreamingStatItem label="গড় স্থায়িত্ব" value={`${streamingStats.avgDurationMinutes}m`} />
-                    <StreamingStatItem label="সর্বোচ্চ ক্যামেরা" value={streamingStats.peakConcurrentCameras} />
+                    <StreamingStatItem label="Total streams" value={streamingStats.totalStreams} />
+                    <StreamingStatItem label=" " value={`${streamingStats.avgDurationMinutes}m`} />
+                    <StreamingStatItem label="Max " value={streamingStats.peakConcurrentCameras} />
                   </div>
                 )}
               </Panel>
@@ -497,9 +497,9 @@ export default function AdminRoute() {
 
           {/* ── Packages ── */}
           {adminTab === "packages" && (
-            <Panel title="প্যাকেজ">
+            <Panel title="Packages">
               {dashboard.packages.length === 0 ? (
-                <EmptyState text="এখনও কোনো প্যাকেজ কনফিগার করা হয়নি।" />
+                <EmptyState text="  Packages   ।" />
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {dashboard.packages.map((item) => (
@@ -517,9 +517,9 @@ export default function AdminRoute() {
 
           {/* ── Payments ── */}
           {adminTab === "payments" && (
-            <Panel title="ম্যানুয়াল পেমেন্ট কিউ">
+            <Panel title="Manual payment queue">
               {pendingPasses.length === 0 ? (
-                <EmptyState text="কোনো ম্যানুয়াল পেমেন্ট রিভিউ অপেক্ষমান নেই।" />
+                <EmptyState text="   Pending reviews ।" />
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">
                   {pendingPasses.map((pass) => (
@@ -538,19 +538,19 @@ export default function AdminRoute() {
 
           {/* ── Rooms ── */}
           {adminTab === "rooms" && (
-            <Panel title="রুম">
+            <Panel title="">
               {dashboard.rooms.length === 0 ? (
-                <EmptyState text="এখনও কোনো রুম তৈরি করা হয়নি।" />
+                <EmptyState text="     ।" />
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[820px] text-left text-sm">
                     <thead className="text-xs uppercase tracking-[0.14em] text-[var(--text-muted)]">
                       <tr>
-                        <th className="px-3 py-2">রুম</th>
-                        <th className="px-3 py-2">পিন (PIN)</th>
-                        <th className="px-3 py-2">স্ট্যাটাস</th>
-                        <th className="px-3 py-2">টেন্যান্ট</th>
-                        <th className="px-3 py-2">মেয়াদ</th>
+                        <th className="px-3 py-2"></th>
+                        <th className="px-3 py-2">PIN</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2">Tenants</th>
+                        <th className="px-3 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -566,33 +566,33 @@ export default function AdminRoute() {
 
           {/* ── Audit Log ── */}
           {adminTab === "audit" && (
-            <Panel title="সাম্প্রতিক অ্যাডমিন অ্যাকশন">
+            <Panel title="  ">
               <div className="mb-4 flex flex-wrap gap-2">
                 <select
                   value={auditLogFilter.actionType}
                   onChange={(e) => setAuditLogFilter((f) => ({ ...f, actionType: e.target.value }))}
                   className="rounded-full border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
                 >
-                  <option value="all">সকল অ্যাকশন</option>
-                  <option value="approve">অনুমোদন</option>
-                  <option value="reject">প্রত্যাখ্যান</option>
-                  <option value="create">তৈরি</option>
-                  <option value="update">আপডেট</option>
-                  <option value="delete">ডিলিট</option>
+                  <option value="all"> </option>
+                  <option value="approve"></option>
+                  <option value="reject"></option>
+                  <option value="create"></option>
+                  <option value="update"></option>
+                  <option value="delete"></option>
                 </select>
                 <select
                   value={auditLogFilter.dateRange}
                   onChange={(e) => setAuditLogFilter((f) => ({ ...f, dateRange: e.target.value }))}
                   className="rounded-full border border-[var(--border-soft)] bg-[var(--panel-soft)] px-3 py-2 text-xs font-semibold text-[var(--text-main)] outline-none focus:border-[var(--border-strong)]"
                 >
-                  <option value="all">সর্বকালীন</option>
-                  <option value="today">আজ</option>
-                  <option value="7days">গত ৭ দিন</option>
-                  <option value="30days">গত ৩০ দিন</option>
+                  <option value="all">All-time</option>
+                  <option value="today"></option>
+                  <option value="7days">  </option>
+                  <option value="30days">  </option>
                 </select>
               </div>
               {filteredAuditLogs.length === 0 ? (
-                <EmptyState text="ফিল্টারের সাথে কোনো অ্যাকশন মেলেনি।" />
+                <EmptyState text="    ।" />
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">
                   {filteredAuditLogs.map((item) => (
@@ -605,9 +605,9 @@ export default function AdminRoute() {
 
           {/* ── Tenants ── */}
           {adminTab === "tenants" && (
-            <Panel title="টেন্যান্ট">
+            <Panel title="Tenants">
               {dashboard.tenants.length === 0 ? (
-                <EmptyState text="এখনও কোনো টেন্যান্ট অ্যাকাউন্ট নেই।" />
+                <EmptyState text="  Tenants  ।" />
               ) : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {dashboard.tenants.map((tenant) => (
@@ -618,7 +618,7 @@ export default function AdminRoute() {
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-[var(--text-main)]">{tenant.name}</p>
                         <p className="mt-1 truncate text-xs text-[var(--text-muted)]">{tenant.email}</p>
-                        <p className="mt-1 text-xs text-[var(--text-muted)]">{tenant.authProvider ?? "ইমেইল"}</p>
+                        <p className="mt-1 text-xs text-[var(--text-muted)]">{tenant.authProvider ?? "Email"}</p>
                       </div>
                     </div>
                   ))}
@@ -639,12 +639,12 @@ type AdminTab = {
 };
 
 const ADMIN_TABS: AdminTab[] = [
-  { id: "overview", label: "সারসংক্ষেপ", icon: <LayoutDashboard size={16} /> },
-  { id: "packages", label: "প্যাকেজ", icon: <Package size={16} /> },
-  { id: "payments", label: "পেমেন্ট", icon: <CreditCard size={16} /> },
-  { id: "rooms", label: "রুম", icon: <MonitorPlay size={16} /> },
-  { id: "audit", label: "অডিট লগ", icon: <FileText size={16} /> },
-  { id: "tenants", label: "টেন্যান্ট", icon: <Users size={16} /> },
+  { id: "overview", label: "", icon: <LayoutDashboard size={16} /> },
+  { id: "packages", label: "Packages", icon: <Package size={16} /> },
+  { id: "payments", label: "", icon: <CreditCard size={16} /> },
+  { id: "rooms", label: "", icon: <MonitorPlay size={16} /> },
+  { id: "audit", label: " ", icon: <FileText size={16} /> },
+  { id: "tenants", label: "Tenants", icon: <Users size={16} /> },
 ];
 
 function AdminTabBar({
@@ -679,7 +679,7 @@ function AdminTabBar({
 
 function formatBDT(cents: number): string {
   const taka = cents / 100;
-  return `৳${taka.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${taka.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function RevenueMetric({
@@ -783,7 +783,7 @@ function PaymentCard({
             className="flex items-center gap-2 rounded-full bg-[var(--accent-lime)] px-4 py-2 text-xs font-semibold text-[#041016] disabled:opacity-60"
           >
             {mutating ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
-            অনুমোদন
+            
           </button>
           <button
             type="button"
@@ -792,7 +792,7 @@ function PaymentCard({
             className="flex items-center gap-2 rounded-full border border-[var(--border-soft)] px-4 py-2 text-xs font-semibold text-[var(--text-main)] disabled:opacity-60"
           >
             <XCircle size={14} />
-            প্রত্যাখ্যান
+            
           </button>
         </div>
       </div>
@@ -804,7 +804,7 @@ function ReadinessPanel({ readiness }: { readiness: AdminReadiness }) {
   const failingChecks = readiness.checks.filter((check) => !check.ok);
 
   return (
-    <Panel title="প্রোডাকশন রেডিনেস">
+    <Panel title=" ">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div
@@ -818,10 +818,10 @@ function ReadinessPanel({ readiness }: { readiness: AdminReadiness }) {
           </div>
           <div>
             <p className="font-semibold text-[var(--text-main)]">
-              {readiness.ready ? "প্রোডাকশন ট্রাফিকের জন্য প্রস্তুত" : `${failingChecks.length}টি প্রোডাকশন চেক মনোযোগ প্রয়োজন`}
+              {readiness.ready ? "   " : `${failingChecks.length}    `}
             </p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              সিক্রেট, মাইগ্রেশন, পেমেন্ট, স্টোরেজ, রিলে এবং টেন্যান্ট লগইন চেক।
+              , , , ,   Tenants Login ।
             </p>
           </div>
         </div>
@@ -843,7 +843,7 @@ function ReadinessPanel({ readiness }: { readiness: AdminReadiness }) {
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[var(--text-main)]">{check.label}</p>
                 <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                  {check.ok ? "কনফিগার করা আছে" : check.action}
+                  {check.ok ? "  " : check.action}
                 </p>
               </div>
             </div>
@@ -867,7 +867,7 @@ function AuditLogItem({ item }: { item: AdminAuditLog }) {
           </p>
         </div>
         <span className="shrink-0 text-right text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
-          {item.created_at ? new Date(item.created_at).toLocaleString() : "এইমাত্র"}
+          {item.created_at ? new Date(item.created_at).toLocaleString() : ""}
         </span>
       </div>
       <p className="mt-2 truncate text-xs text-[var(--text-muted)]">
@@ -958,19 +958,19 @@ function PackageEditor({
             onChange={(event) => updateDraft("active", event.target.checked)}
             className="h-4 w-4 accent-[var(--accent-lime)]"
           />
-          {draft.active ? "প্রকাশিত" : "লুকানো"}
+          {draft.active ? "" : ""}
         </label>
       </div>
 
       <div className="grid gap-3">
         <TextField
-          label="প্যাকেজের নাম"
+          label="Packages "
           value={draft.name}
           onChange={(value) => updateDraft("name", value)}
         />
         <label className="block">
           <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            বিবরণ
+            
           </span>
           <textarea
             value={draft.description}
@@ -982,44 +982,44 @@ function PackageEditor({
         <div className="grid gap-3 sm:grid-cols-2">
           <TextField
             inputMode="numeric"
-            label="মূল্য (পয়সা)"
+            label=" ()"
             value={draft.priceCents}
             onChange={(value) => updateDraft("priceCents", value)}
           />
           <TextField
             inputMode="numeric"
-            label="স্থায়িত্ব (মিনিট)"
+            label=" ()"
             value={draft.durationMinutes}
             onChange={(value) => updateDraft("durationMinutes", value)}
           />
           <TextField
             inputMode="numeric"
-            label="সর্বোচ্চ রুম"
+            label="Max "
             value={draft.maxRooms}
             onChange={(value) => updateDraft("maxRooms", value)}
           />
           <TextField
             inputMode="numeric"
-            label="সর্বোচ্চ ক্যামেরা"
+            label="Max "
             value={draft.maxCameras}
             onChange={(value) => updateDraft("maxCameras", value)}
           />
           <TextField
             inputMode="numeric"
-            label="সর্বোচ্চ অ্যাড ভিডিও"
+            label="Max  "
             value={draft.maxAdVideos}
             onChange={(value) => updateDraft("maxAdVideos", value)}
           />
           <TextField
             inputMode="numeric"
-            label="ক্রমিক নম্বর"
+            label=" "
             value={draft.sortOrder}
             onChange={(value) => updateDraft("sortOrder", value)}
           />
         </div>
         <label className="block">
           <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            বৈশিষ্ট্যসমূহ
+            
           </span>
           <textarea
             value={draft.featuresText}
@@ -1036,7 +1036,7 @@ function PackageEditor({
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--accent-cyan)] px-4 py-3 text-sm font-semibold text-[#041016] disabled:opacity-60"
       >
         {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-        {saving ? "সেভ হচ্ছে..." : "প্যাকেজ সেভ করুন"}
+        {saving ? " ..." : "Packages  "}
       </button>
     </form>
   );
@@ -1089,30 +1089,30 @@ function RoomRow({ room }: { room: RoomSummary }) {
 
 function getRoomAccessStatus(room: RoomSummary): string {
   if (room.status === "active" && room.expires_at && new Date(room.expires_at).getTime() <= Date.now()) {
-    return "মেয়াদোত্তীর্ণ";
+    return "";
   }
 
   const statusMap: Record<string, string> = {
-    active: "সক্রিয়",
-    pending: "অপেক্ষমান",
-    expired: "মেয়াদোত্তীর্ণ",
-    suspended: "স্থগিত",
+    active: "",
+    pending: "",
+    expired: "",
+    suspended: "",
   };
 
-  return statusMap[room.status ?? ""] ?? (room.status ?? "সক্রিয়");
+  return statusMap[room.status ?? ""] ?? (room.status ?? "");
 }
 
 export function getStatusClassName(status: string): string {
   const base = "rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]";
   const lower = status.toLowerCase();
   
-  if (lower === "সক্রিয়" || lower === "active" || lower === "ready" || lower === "paid") {
+  if (lower === "" || lower === "active" || lower === "ready" || lower === "paid") {
     return `${base} bg-[var(--accent-lime)]/15 text-[var(--accent-lime)]`;
   }
-  if (lower === "মেয়াদোত্তীর্ণ" || lower === "expired" || lower === "cancelled" || lower === "deleted" || lower === "failed") {
+  if (lower === "" || lower === "expired" || lower === "cancelled" || lower === "deleted" || lower === "failed") {
     return `${base} bg-[var(--accent-coral)]/15 text-[#ffd8d4]`;
   }
-  if (lower === "পেন্ডিং" || lower === "pending" || lower === "pending_manual_review") {
+  if (lower === "" || lower === "pending" || lower === "pending_manual_review") {
     return `${base} bg-[var(--accent-cyan)]/15 text-[var(--accent-cyan)]`;
   }
   
